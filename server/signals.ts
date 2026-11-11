@@ -184,7 +184,9 @@ export function attention(input: AttentionInput): Attention[] {
     });
   }
 
+  const failingNumbers = new Set(input.failing.map((pr) => pr.number));
   for (const pr of input.open) {
+    if (failingNumbers.has(pr.number)) continue;
     if (pr.conflict) {
       items.push({
         kind: "conflict",
