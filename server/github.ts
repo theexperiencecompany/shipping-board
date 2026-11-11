@@ -43,7 +43,10 @@ async function request<T>(url: string, init?: RequestInit, attempt = 0): Promise
   const reset = response.headers.get("x-ratelimit-reset");
   if (reset) rate.reset = Number(reset);
 
-  if ((response.status === 403 || response.status === 429) && attempt < 2) {
+  const limited =
+    response.status === 429 ||
+    (response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0");
+  if (limited && attempt < 2) {
     const wait = Number(response.headers.get("retry-after") ?? 0) * 1000 || 1500 * (attempt + 1);
     await new Promise((resolve) => setTimeout(resolve, wait));
     return request<T>(url, init, attempt + 1);

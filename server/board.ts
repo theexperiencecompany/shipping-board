@@ -533,14 +533,20 @@ async function snapshot(): Promise<BoardData> {
     runsBySha.set(run.head_sha, list);
   }
 
-  const pickRun = (sha: string): Run | undefined => {
-    const list = runsBySha.get(sha);
-    if (!list) return undefined;
-    return (
-      list.find((run) => run.status !== "completed") ??
-      list.find((run) => run.conclusion !== "success" && run.conclusion !== "skipped") ??
-      list[0]
+  // The newest run decides. A cancelled run was replaced by a newer one, so it says nothing.
+  const newest = (list: Run[]) =>
+    list.find((run) => run.event !== "merge_group" && run.conclusion !== "cancelled");
+
+  // The shared page covers a few hours. Older PRs get a lookup by commit.
+  const pickRun = async (sha: string): Promise<Run | undefined> => {
+    const hit = newest(runsBySha.get(sha) ?? []);
+    if (hit) return hit;
+    const data = await cached(`runs:${sha}`, 300_000, () =>
+      rest<{ workflow_runs: Run[] }>(
+        `/repos/${REPO}/actions/workflows/${config.workflow}/runs?head_sha=${sha}&per_page=5`,
+      ),
     );
+    return newest(data.workflow_runs);
   };
 
   const testing = runs.workflow_runs.find(
@@ -571,9 +577,9 @@ async function snapshot(): Promise<BoardData> {
   );
 
   const cards = await mapLimit(active, 6, async (node) => {
-    const run = pickRun(node.headRefOid);
-    if (!run) return { card: baseCard(node), run: undefined };
     try {
+      const run = await pickRun(node.headRefOid);
+      if (!run) return { card: baseCard(node), run: undefined };
       return { card: withRun(baseCard(node), run, await jobsFor(run)), run };
     } catch {
       return { card: baseCard(node), run: undefined };
@@ -588,14 +594,12 @@ async function snapshot(): Promise<BoardData> {
   for (const { card, run } of cards) {
     const recent = Date.now() - new Date(card.lastCommitAt ?? card.updatedAt).getTime() < RECENT;
     if (recent) open.push(card);
+    // Conflicts and requested changes already have a card in Needs you.
     if (!run || card.conflict) continue;
-    if (card.failure) {
-      if (run.conclusion !== "cancelled") failing.push(card);
-    } else if (run.status !== "completed") {
-      running.push(card);
-    } else if (run.conclusion === "success" && !card.changesRequested) {
-      ready.push(card);
-    }
+    if (card.failure) failing.push(card);
+    else if (card.changesRequested) continue;
+    else if (run.status !== "completed") running.push(card);
+    else if (run.conclusion === "success") ready.push(card);
   }
 
   const waitingRuns = runs.workflow_runs

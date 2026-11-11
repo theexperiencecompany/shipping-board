@@ -26,7 +26,7 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
           label="Needs you"
           count={data.attention.length + data.ready.length}
           tone={data.attention.length > 0 ? "danger" : "ok"}
-          hidden={hiddenLeft}
+          hidden={clear ? 0 : hiddenLeft}
         >
           {clear ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2">

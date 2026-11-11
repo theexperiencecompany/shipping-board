@@ -112,11 +112,21 @@ describe("mainState", () => {
     expect(mainState("master", runs)).toEqual({ name: "master", state: "pass", since: ago(60) });
   });
 
-  it("says checking while the newest push is still running", () => {
+  it("says checking only when no push has finished yet", () => {
     const runs = [
       run({ event: "push", head_branch: "master", status: "in_progress", created_at: ago(3) }),
     ];
     expect(mainState("master", runs).state).toBe("run");
+  });
+
+  it("keeps main red while a fix is still running", () => {
+    const runs = [
+      run({ event: "push", head_branch: "master", status: "in_progress", conclusion: null }),
+      run({ event: "push", head_branch: "master", conclusion: "failure", updated_at: ago(40) }),
+      run({ event: "push", head_branch: "master", conclusion: "skipped", updated_at: ago(50) }),
+      run({ event: "push", head_branch: "master", conclusion: "failure", updated_at: ago(70) }),
+    ];
+    expect(mainState("master", runs)).toEqual({ name: "master", state: "fail", since: ago(70) });
   });
 });
 

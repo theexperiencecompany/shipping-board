@@ -37,19 +37,26 @@ export function ciTiming(runs: Run[]): Timing | null {
 
 /** State of the main branch, and when it last changed. Runs arrive newest first. */
 export function mainState(name: string, runs: Run[]): MainBranch {
-  const pushes = runs.filter(
-    (run) => run.event === "push" && run.head_branch === name && run.conclusion !== "cancelled",
+  const pushes = runs.filter((run) => run.event === "push" && run.head_branch === name);
+  // Only a pass or a fail says anything about main. Cancelled, skipped and in-flight runs do not.
+  const decided = pushes.filter(
+    (run) =>
+      run.status === "completed" &&
+      !["cancelled", "skipped", "neutral"].includes(run.conclusion ?? ""),
   );
-  const head = pushes[0];
-  if (!head) return { name, state: "unknown", since: null };
-  if (head.status !== "completed") return { name, state: "run", since: head.created_at };
+  const head = decided[0];
+  if (!head) {
+    const running = pushes.find((run) => run.status !== "completed");
+    return running
+      ? { name, state: "run", since: running.created_at }
+      : { name, state: "unknown", since: null };
+  }
 
-  const state = head.conclusion === "success" ? "pass" : "fail";
+  const verdict = (run: Run) => (run.conclusion === "success" ? "pass" : "fail");
+  const state = verdict(head);
   let since = head.updated_at;
-  for (const run of pushes) {
-    if (run.status !== "completed") continue;
-    const same = (run.conclusion === "success" ? "pass" : "fail") === state;
-    if (!same) break;
+  for (const run of decided) {
+    if (verdict(run) !== state) break;
     since = run.updated_at;
   }
   return { name, state, since };
@@ -133,7 +140,7 @@ export function attention(input: AttentionInput): Attention[] {
         stalled.length === 1
           ? "1 CI run has not started"
           : `${stalled.length} CI runs have not started`,
-      detail: `No runner has picked them up.${poolText(input.runners)}`,
+      detail: `Queued with no job started.${poolText(input.runners)}`,
       since: oldest.createdAt,
     });
   }
