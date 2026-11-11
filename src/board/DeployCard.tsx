@@ -1,6 +1,7 @@
 import { AuthorAvatar } from "./AuthorAvatar";
 import { Icon } from "./Icon";
 import { cn } from "./cn";
+import { duration } from "./time";
 import type { Deploy, DeployStep } from "./types";
 
 const STEP: Record<DeployStep["state"], { tone: string; icon?: string; spin?: boolean }> = {
@@ -22,7 +23,7 @@ export function DeployCard({ deploy }: { deploy: Deploy }) {
         </span>
         <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-ink-3">
           <Icon name="i-clock" className="size-2.5" />
-          {deploy.minutes} min
+          {duration(deploy.minutes)}
         </span>
       </div>
 

@@ -13,6 +13,7 @@ function onlyMine(data: BoardData): BoardData {
     ...data,
     needs: data.needs.filter((pr) => mine(pr.author)),
     running: data.running.filter((pr) => mine(pr.author)),
+    ready: data.ready.filter((pr) => mine(pr.author)),
     queue: data.queue.filter((entry) => mine(entry.author)),
   };
 }
@@ -25,14 +26,13 @@ export default function App() {
   const [syncedAt, setSyncedAt] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [filtered, setFiltered] = useState(false);
-  const [demo, setDemo] = useState(() => new URLSearchParams(location.search).has("demo"));
 
   useEffect(() => {
     let alive = true;
 
     const load = async () => {
       try {
-        const response = await fetch(`/api/board${demo ? "?demo=1" : ""}`);
+        const response = await fetch("/api/board");
         const payload = (await response.json()) as Payload & { error?: string };
         if (!response.ok || payload.error) throw new Error(payload.error ?? response.statusText);
         if (!alive) return;
@@ -52,7 +52,7 @@ export default function App() {
       clearInterval(poll);
       clearInterval(tick);
     };
-  }, [demo]);
+  }, []);
 
   const view = useMemo(() => (data && filtered ? onlyMine(data) : data), [data, filtered]);
   const age = syncedAt ? Math.max(0, Math.round((now - syncedAt) / 1000)) : null;
@@ -83,17 +83,6 @@ export default function App() {
         >
           <Icon name="i-user" className={`size-[11px] ${filtered ? "" : "text-ink-3"}`} />
           {filtered ? "Only mine" : "Everyone"}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setDemo((value) => !value)}
-          aria-pressed={demo}
-          className={`inline-flex h-6 items-center gap-1.5 rounded-[7px] px-2.5 text-[11.5px] transition-colors ${
-            demo ? "bg-warn/15 text-warn" : "bg-card text-ink-2 hover:bg-card-hi"
-          }`}
-        >
-          Demo
         </button>
 
         <div className="flex-1" />

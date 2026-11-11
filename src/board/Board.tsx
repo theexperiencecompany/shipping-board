@@ -3,6 +3,7 @@ import { Column } from "./Column";
 import { DeployCard } from "./DeployCard";
 import { DeploymentCard } from "./DeploymentCard";
 import { FailureDialog } from "./FailureDialog";
+import { Icon } from "./Icon";
 import { PrCard } from "./PrCard";
 import type { BoardData, FailureReport } from "./types";
 
@@ -21,7 +22,10 @@ export function Board({ data }: { data: BoardData; viewer: string }) {
 
   const needs = data.needs.slice(0, MAX_PER_COLUMN);
   const running = data.running.slice(0, MAX_PER_COLUMN);
+  const ready = data.ready;
   const deployments = data.deployments.slice(0, MAX_PER_COLUMN);
+  const checks = running.length + ready.length;
+  const more = Math.max(0, data.running.length + data.ready.length - MAX_PER_COLUMN);
 
   return (
     <>
@@ -42,18 +46,37 @@ export function Board({ data }: { data: BoardData; viewer: string }) {
           )}
         </Column>
 
-        <Column
-          icon="i-flowchart"
-          label="Running checks"
-          count={data.running.length}
-          more={data.running.length - running.length}
-        >
-          {running.length === 0 ? (
-            <Empty label="No checks are running." />
-          ) : (
-            running.map((pr, index) => (
-              <PrCard key={pr.number} pr={pr} index={index} onFailure={setFailure} />
-            ))
+        <Column icon="i-flowchart" label="Checks" count={checks} more={more}>
+          {checks === 0 && <Empty label="Nothing is running." />}
+
+          {ready.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-1.5 px-1">
+                <Icon name="i-tick" className="size-3 text-ok" />
+                <span className="text-[11px] font-medium text-ok">Ready to merge</span>
+                <span className="text-[11px] text-ink-3">{ready.length}</span>
+              </div>
+              {ready.map((pr, index) => (
+                <PrCard key={pr.number} pr={pr} index={index} onFailure={setFailure} ready />
+              ))}
+            </div>
+          )}
+
+          {ready.length > 0 && running.length > 0 && <div className="my-1 h-px bg-[#121a26]" />}
+
+          {running.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {ready.length > 0 && (
+                <div className="flex items-center gap-1.5 px-1">
+                  <Icon name="i-spin" className="spin size-3 text-warn" />
+                  <span className="text-[11px] font-medium text-warn">Running</span>
+                  <span className="text-[11px] text-ink-3">{running.length}</span>
+                </div>
+              )}
+              {running.map((pr, index) => (
+                <PrCard key={pr.number} pr={pr} index={index} onFailure={setFailure} />
+              ))}
+            </div>
           )}
         </Column>
 
@@ -70,7 +93,7 @@ export function Board({ data }: { data: BoardData; viewer: string }) {
           ) : (
             deployments.map((deployment) => (
               <DeploymentCard
-                key={`${deployment.at}-${deployment.environment}`}
+                key={`${deployment.createdAt}-${deployment.environment}`}
                 deployment={deployment}
               />
             ))

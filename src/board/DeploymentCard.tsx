@@ -1,5 +1,6 @@
 import { AuthorAvatar } from "./AuthorAvatar";
 import { Icon } from "./Icon";
+import { duration, timeAgo } from "./time";
 import { cn } from "./cn";
 import type { Deployment } from "./types";
 
@@ -31,9 +32,9 @@ export function DeploymentCard({ deployment }: { deployment: Deployment }) {
           {deployment.environment}
         </span>
 
-        <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-ink-3">
+        <span className="ml-auto inline-flex items-center gap-1 text-[11px] whitespace-nowrap text-ink-3">
           <Icon name="i-clock" className="size-2.5" />
-          {deployment.at} · {deployment.durationMinutes} min
+          {timeAgo(deployment.createdAt)}
         </span>
       </div>
 
@@ -46,6 +47,9 @@ export function DeploymentCard({ deployment }: { deployment: Deployment }) {
           <AuthorAvatar name={deployment.pr.author} size={14} />
           {deployment.pr.number}
           <span className="text-ink-3">by {deployment.pr.author}</span>
+          <span className="ml-auto whitespace-nowrap text-ink-3">
+            took {duration(deployment.durationMinutes)}
+          </span>
         </p>
       )}
 

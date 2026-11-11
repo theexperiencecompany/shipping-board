@@ -59,6 +59,19 @@ async function request<T>(url: string, init?: RequestInit, attempt = 0): Promise
 
 export const rest = <T>(path: string) => request<T>(`${API}${path}`);
 
+export async function restText(path: string): Promise<string> {
+  const response = await fetch(`${API}${path}`, {
+    redirect: "follow",
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token()}`,
+      "x-github-api-version": "2022-11-28",
+    },
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText} ${path}`);
+  return response.text();
+}
+
 export const graphql = <T>(query: string, variables: Record<string, unknown>) =>
   request<{ data: T; errors?: { message: string }[] }>(GRAPHQL, {
     method: "POST",

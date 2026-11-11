@@ -1,21 +1,24 @@
 export type MachineKind = "home" | "github" | "blacksmith" | "m4";
 
-export const LANES = ["lint", "build", "test", "e2e"] as const;
-
-export type LaneName = (typeof LANES)[number];
-
 export type LaneState = "pass" | "run" | "fail" | "wait" | "skip";
 
 export interface Lane {
-  name: LaneName;
+  name: string;
   state: LaneState;
+}
+
+export interface FailureJob {
+  id: number;
+  name: string;
+  conclusion: string | null;
+  url: string;
 }
 
 export interface FailureReport {
   headline: string;
   meta: string;
   errors: number;
-  log: string;
+  jobs: FailureJob[];
 }
 
 export interface PullRequest {
@@ -24,6 +27,7 @@ export interface PullRequest {
   branch: string;
   author: string;
   minutes: number;
+  updatedAt: string;
   machine: MachineKind;
   lanes: Lane[];
   failure?: FailureReport;
@@ -64,7 +68,7 @@ export interface Deploy {
 export type DeploymentStatus = "live" | "failed";
 
 export interface Deployment {
-  at: string;
+  createdAt: string;
   environment: string;
   status: DeploymentStatus;
   note?: string;
@@ -77,16 +81,24 @@ export interface RunnerLoad {
   jobs: number;
 }
 
+export interface BatchInfo {
+  done: number;
+  total: number;
+  minutesLeft?: number;
+}
+
 export interface BoardData {
   viewer: string;
   clock: string;
   updatedSeconds: number;
   averageWaitMinutes: number;
   mergedToday: number;
-  batchDurations: number[];
+  laneNames: string[];
   needs: PullRequest[];
   running: PullRequest[];
+  ready: PullRequest[];
   queue: QueueEntry[];
+  batch: BatchInfo | null;
   deploy: Deploy | null;
   deployments: Deployment[];
   runners: RunnerLoad[];

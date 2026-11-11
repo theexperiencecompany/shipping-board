@@ -1,16 +1,28 @@
 import type { Plugin } from "vite-plus";
-import { loadBoard, rateStatus } from "./board";
+import { jobLog, loadBoard, rateStatus } from "./board";
 
 function handler(request: { url?: string }, response: any, next: () => void) {
-  if (!request.url?.startsWith("/api/board")) {
+  if (!request.url?.startsWith("/api/")) {
     next();
     return;
   }
 
   void (async () => {
     try {
-      const demo = request.url?.includes("demo=1") ?? false;
-      const board = await loadBoard(demo);
+      if (request.url!.startsWith("/api/failure")) {
+        const id = Number(new URL(request.url!, "http://x").searchParams.get("job"));
+        if (!Number.isFinite(id) || id <= 0) {
+          response.statusCode = 400;
+          response.end("missing job");
+          return;
+        }
+        const log = await jobLog(id);
+        response.setHeader("content-type", "text/plain; charset=utf-8");
+        response.end(log);
+        return;
+      }
+
+      const board = await loadBoard();
       response.setHeader("content-type", "application/json");
       response.setHeader("cache-control", "no-store");
       response.end(JSON.stringify({ board, rate: rateStatus() }));
@@ -27,10 +39,12 @@ function handler(request: { url?: string }, response: any, next: () => void) {
 export function boardApi(): Plugin {
   return {
     name: "board-api",
-    configurePreviewServer(server) {
+    configureServer(server) {
+      void loadBoard().catch(() => {});
       server.middlewares.use(handler);
     },
-    configureServer(server) {
+    configurePreviewServer(server) {
+      void loadBoard().catch(() => {});
       server.middlewares.use(handler);
     },
   };
