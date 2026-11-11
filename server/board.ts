@@ -97,6 +97,9 @@ function rollUp(states: LaneState[]): LaneState {
 }
 
 function lanesOf(jobs: Job[]): Lane[] {
+  if (jobs.length === 0) {
+    return config.lanes.map((rule) => ({ name: rule.name, state: "wait" as LaneState }));
+  }
   const buckets = new Map<string, LaneState[]>();
   for (const job of jobs) {
     const lane = laneOf(job.name);

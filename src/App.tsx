@@ -29,6 +29,8 @@ export default function App() {
 
   useEffect(() => {
     let alive = true;
+    let ready = false;
+    let timer = 0;
 
     const load = async () => {
       try {
@@ -39,17 +41,19 @@ export default function App() {
         setData(payload.board);
         setSyncedAt(Date.now());
         setError(null);
+        ready = true;
       } catch (cause) {
         if (alive) setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        if (alive) timer = window.setTimeout(load, ready ? POLL : 3000);
       }
     };
 
-    load();
-    const poll = setInterval(load, POLL);
+    void load();
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => {
       alive = false;
-      clearInterval(poll);
+      clearTimeout(timer);
       clearInterval(tick);
     };
   }, []);

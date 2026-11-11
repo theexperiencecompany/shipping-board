@@ -19,13 +19,39 @@ export function PrCard({
 }) {
   const failure = pr.failure;
 
+  if (ready) {
+    return (
+      <article
+        className="rise flex flex-col gap-1 rounded-xl bg-[#0f1a15] px-[13px] pt-2.5 pb-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.032)]"
+        style={{ animationDelay: `${index * 30}ms` }}
+      >
+        <div className="flex items-start gap-1.5">
+          <Icon name="i-tick" className="mt-0.5 size-3 shrink-0 text-ok" />
+          <h3 className="truncate text-[12.5px] leading-[1.3] font-medium tracking-[-0.008em]">
+            {pr.title}
+          </h3>
+          <span className="ml-auto shrink-0 text-[11px] text-ink-3">{pr.number}</span>
+        </div>
+        <div className="flex items-center gap-1.5 pl-[18px] text-[11px] text-ink-3">
+          <AuthorAvatar name={pr.author} size={13} />
+          <span className="truncate">{pr.author}</span>
+          <span className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap">
+            <Icon name="i-clock" className="size-2.5" />
+            {timeAgo(pr.updatedAt)}
+          </span>
+        </div>
+      </article>
+    );
+  }
+
+  const visibleLanes = failure ? pr.lanes.filter((lane) => lane.state !== "pass") : pr.lanes;
+
   return (
     <article
       className={cn(
         "rise flex flex-col gap-[7px] rounded-xl px-[13px] pt-3 pb-3 transition-colors",
         "shadow-[inset_0_1px_0_rgba(255,255,255,0.032)]",
-        failure && "cursor-pointer bg-[#191216] hover:bg-[#1e161a]",
-        !failure && (ready ? "bg-[#0f1a15]" : "bg-card hover:bg-card-hi"),
+        failure ? "cursor-pointer bg-[#191216] hover:bg-[#1e161a]" : "bg-card hover:bg-card-hi",
       )}
       style={{ animationDelay: `${index * 30}ms` }}
       {...(failure
@@ -51,7 +77,7 @@ export function PrCard({
 
       <p className="-mt-1 truncate text-[11px] text-ink-3">{pr.branch}</p>
 
-      <Lanes lanes={pr.lanes} />
+      {visibleLanes.length > 0 && <Lanes lanes={visibleLanes} />}
 
       <div className="mt-0.5 flex items-center gap-1.5">
         <MachineChip kind={pr.machine} />
