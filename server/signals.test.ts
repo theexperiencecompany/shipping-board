@@ -305,6 +305,17 @@ describe("errorLine", () => {
     ).toBe("mutation/a.py: 1 surviving mutant(s) on 1 changed line(s) in a.py");
   });
 
+  it("skips a bare count for the test it summarises", () => {
+    expect(
+      errorLine(
+        log([
+          "##[error]ts-build-test/test-typescript: FAIL — test-typescript: 2 finding(s) (exit 1)",
+          "##[error]FAIL src/__tests__/a.test.tsx > settings > rolls back a refused change",
+        ]),
+      ),
+    ).toBe("FAIL src/__tests__/a.test.tsx > settings > rolls back a refused change");
+  });
+
   it("returns nothing when the log has no real error", () => {
     expect(errorLine(log(["##[error]Process completed with exit code 1."]))).toBeNull();
   });

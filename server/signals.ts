@@ -69,6 +69,8 @@ const NOISE = [
   /^Process completed with exit code/,
   /: FAIL — \d+ of \d+ /,
   /\b(above|below|attached)\W*$/,
+  // A bare count ("2 finding(s) (exit 1)") names nothing; the lines after it do.
+  /\b\d+ (finding|error|failure|problem|issue)\(?s?\)?( \(exit \d+\))?\.?$/,
 ];
 
 /** The first error line in a GitHub Actions log that actually says what broke. */
