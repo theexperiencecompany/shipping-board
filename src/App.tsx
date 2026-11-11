@@ -98,7 +98,9 @@ export default function App() {
       <main className={cn("min-h-0 flex-1 transition-opacity", stale && "opacity-40")}>
         <Board data={view} now={now} />
       </main>
-      <LiveStrip data={view} now={now} />
+      <div className={cn("transition-opacity", stale && "opacity-40")}>
+        <LiveStrip data={view} now={now} />
+      </div>
     </div>
   );
 }

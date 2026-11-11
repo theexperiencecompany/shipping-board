@@ -6,6 +6,7 @@ import { lasted } from "./time";
 import type { Attention, AttentionKind, FailureReport } from "./types";
 
 const KIND: Record<AttentionKind, { label: string; icon: IconName; hot: boolean }> = {
+  main: { label: "Main branch red", icon: "i-alert", hot: true },
   deploy: { label: "Deploy failed", icon: "i-ship", hot: true },
   backlog: { label: "CI stuck", icon: "i-clock", hot: true },
   systemic: { label: "Same failure on many PRs", icon: "i-batch", hot: true },

@@ -610,10 +610,12 @@ async function snapshot(): Promise<BoardData> {
 
   const mergeTimes = mergeStats(merged, Date.now());
 
+  const main = mainState(BRANCH, mainRuns.workflow_runs);
+
   return {
     viewer: viewer.login,
     clock: zonedClock(config.timezone),
-    main: mainState(BRANCH, mainRuns.workflow_runs),
+    main,
     mergedDay: mergeTimes.day,
     mergedWeekAverage: mergeTimes.weekAverage,
     shippedTypical:
@@ -633,6 +635,7 @@ async function snapshot(): Promise<BoardData> {
     ci: ciTiming(runs.workflow_runs),
     deployTypical: greenDeploys.length >= 3 ? percentile(greenDeploys, 0.5) : null,
     attention: attention({
+      main,
       failing,
       open,
       waitingRuns,

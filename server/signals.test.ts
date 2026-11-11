@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { Deployment, PullRequest } from "../src/board/types";
+import type { Deployment, MainBranch, PullRequest } from "../src/board/types";
 import type { Run } from "./github";
 import {
   attention,
@@ -66,6 +66,7 @@ function failing(number: number, jobs: string[], overrides: Partial<PullRequest>
 }
 
 const base = {
+  main: { name: "master", state: "pass", since: null } as MainBranch,
   failing: [] as PullRequest[],
   open: [] as PullRequest[],
   waitingRuns: [] as { createdAt: string }[],
@@ -168,7 +169,16 @@ describe("attention", () => {
     expect(second.detail).toBe("lint-node failed.");
   });
 
-  it("puts a failed deploy first", () => {
+  it("puts a red main branch above everything", () => {
+    const items = attention({
+      ...base,
+      main: { name: "master", state: "fail", since: ago(25) },
+      failing: [failing(1, ["lint-node"])],
+    });
+    expect(items[0]).toMatchObject({ kind: "main", title: "master is failing", since: ago(25) });
+  });
+
+  it("puts a failed deploy before pull requests", () => {
     const deploy: Deployment = {
       createdAt: ago(5),
       environment: "production",

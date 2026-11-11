@@ -61,15 +61,17 @@ export function jobFamily(name: string): string {
 }
 
 const SEVERITY: Record<AttentionKind, number> = {
-  deploy: 0,
-  backlog: 1,
-  systemic: 2,
-  failing: 3,
-  conflict: 4,
-  changes: 5,
+  main: 0,
+  deploy: 1,
+  backlog: 2,
+  systemic: 3,
+  failing: 4,
+  conflict: 5,
+  changes: 6,
 };
 
 export interface AttentionInput {
+  main: MainBranch;
   failing: PullRequest[];
   open: PullRequest[];
   waitingRuns: { createdAt: string }[];
@@ -97,6 +99,16 @@ function poolText(runners: RunnerPool[] | null): string {
 export function attention(input: AttentionInput): Attention[] {
   const items: Attention[] = [];
   const { now } = input;
+
+  if (input.main.state === "fail" && input.main.since) {
+    items.push({
+      kind: "main",
+      key: "main",
+      title: `${input.main.name} is failing`,
+      detail: "Everything merged now lands on a broken base. Fix this first.",
+      since: input.main.since,
+    });
+  }
 
   if (input.latestDeploy?.status === "failed") {
     const deploy = input.latestDeploy;

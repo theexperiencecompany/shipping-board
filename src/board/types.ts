@@ -45,7 +45,14 @@ export interface PullRequest {
 }
 
 /** Why something sits in the "Needs you" column. Ordered by severity. */
-export type AttentionKind = "deploy" | "backlog" | "systemic" | "failing" | "conflict" | "changes";
+export type AttentionKind =
+  | "main"
+  | "deploy"
+  | "backlog"
+  | "systemic"
+  | "failing"
+  | "conflict"
+  | "changes";
 
 export interface Attention {
   kind: AttentionKind;
