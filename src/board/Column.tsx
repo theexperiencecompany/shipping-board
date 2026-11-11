@@ -9,33 +9,67 @@ export function Column({
   label,
   count,
   tone = "neutral",
-  more = 0,
+  hidden = 0,
+  className,
   children,
 }: {
   icon: IconName;
   label: string;
-  count: number;
+  count?: number;
   tone?: Tone;
-  more?: number;
+  hidden?: number;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl bg-lane px-2.5 pt-2.5 pb-3">
-      <header className="flex shrink-0 items-center gap-[7px] px-1 pb-2.5">
+    <section
+      className={cn(
+        "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[1.1rem] bg-lane px-[0.7rem] pt-[0.8rem] pb-[0.7rem]",
+        className,
+      )}
+    >
+      <header className="flex shrink-0 items-center gap-2.5 px-[0.3rem] pb-[0.7rem]">
         <Icon
           name={icon}
           className={cn(
-            "size-3 shrink-0",
+            "size-[1.05rem] shrink-0",
             tone === "danger" && "text-err",
             tone === "ok" && "text-ok",
             tone === "neutral" && "text-ink-3",
           )}
         />
-        <span className="text-[12.5px] font-medium tracking-[-0.005em] text-ink-2">{label}</span>
-        <em className="ml-auto text-[11.5px] font-normal text-ink-3 not-italic">{count}</em>
+        <h2 className="text-[1.15rem] font-semibold tracking-[-0.015em] text-ink">{label}</h2>
+        {count !== undefined && count > 0 && (
+          <span className="text-[1.15rem] font-semibold text-ink-3">{count}</span>
+        )}
+        {hidden > 0 && (
+          <span className="ml-auto text-[0.85rem] text-ink-3">{hidden} more not shown</span>
+        )}
       </header>
-      <div className="flex min-h-0 flex-1 flex-col gap-2">{children}</div>
-      {more > 0 && <p className="mt-2 px-1 text-[11px] text-ink-3">+{more} more</p>}
+      {children}
     </section>
+  );
+}
+
+export function SubHead({
+  icon,
+  label,
+  tone,
+  count,
+  note,
+}: {
+  icon: IconName;
+  label: string;
+  tone: string;
+  count?: number;
+  note?: string;
+}) {
+  return (
+    <div className="mt-[0.4rem] flex shrink-0 items-center gap-2 px-[0.3rem]">
+      <Icon name={icon} className={cn("size-[0.85rem]", tone)} />
+      <span className={cn("text-[0.85rem] font-semibold", tone)}>{label}</span>
+      {count !== undefined && <span className="text-[0.85rem] text-ink-3">{count}</span>}
+      {note && <span className="ml-auto text-[0.85rem] text-ink-3">{note}</span>}
+    </div>
   );
 }

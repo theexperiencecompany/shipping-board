@@ -30,7 +30,13 @@ export const config = {
     { name: "test", match: [/^test-/, /mutation/, /coverage/] },
   ] as LaneRule[],
   readyLimit: 4,
-  maxPerColumn: 5,
+  shippedLimit: 12,
+  /** A CI run that no runner has picked up for this long counts as stuck. */
+  backlogMinutes: 15,
+  /** The same check failing on this many pull requests is one problem, not several. */
+  systemicCount: 3,
+  /** A failing pull request with no push for this long is flagged as abandoned. */
+  idleMinutes: 30,
   logTailLines: 120,
   pollMs: 15_000,
   cacheMs: 20_000,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { laneOf } from "./config";
-import { startOfDay, zonedClock } from "./time";
+import { zonedClock } from "./time";
 
 describe("laneOf", () => {
   it("maps lint jobs", () => {
@@ -38,10 +38,5 @@ describe("timezone", () => {
   it("renders the clock in the configured zone", () => {
     expect(zonedClock("Asia/Kolkata", at)).toBe("02:00");
     expect(zonedClock("UTC", at)).toBe("20:30");
-  });
-
-  it("starts the day in the configured zone", () => {
-    const start = startOfDay("Asia/Kolkata", at);
-    expect(new Date(start).toISOString()).toBe("2026-11-12T18:30:00.000Z");
   });
 });

@@ -9,9 +9,20 @@ import type {
   MachineKind,
   PullRequest,
   QueueEntry,
+  RunnerPool,
 } from "../src/board/types";
 import { config, isControlJob, laneOf } from "./config";
-import { startOfDay, zonedClock } from "./time";
+import {
+  attention,
+  ciTiming,
+  livePerEnvironment,
+  mainState,
+  type Merged,
+  mergeStats,
+  percentile,
+  runMinutes,
+} from "./signals";
+import { zonedClock } from "./time";
 import {
   graphql,
   lowBudget,
@@ -21,7 +32,6 @@ import {
   type Deployment as ApiDeployment,
   type DeploymentStatus,
   type Job,
-  type Pull,
   type Run,
 } from "./github";
 
@@ -68,18 +78,28 @@ async function mapLimit<T, R>(
   return out;
 }
 
+function minutesBetween(from: string, to: string): number {
+  return Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000));
+}
+
 function minutesSince(iso: string | null): number {
   if (!iso) return 0;
   return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
 }
 
-function machineOf(job: Job): MachineKind {
-  const name = job.runner_name ?? "";
+function machineOfName(name: string): MachineKind {
   for (const rule of config.machines) {
     if (rule.runner.some((pattern) => pattern.test(name))) return rule.kind;
   }
-  if (job.labels.some((label) => /blacksmith/i.test(label))) return "blacksmith";
   return "github";
+}
+
+function machineOf(job: Job): MachineKind {
+  const kind = machineOfName(job.runner_name ?? "");
+  if (kind === "github" && job.labels.some((label) => /blacksmith/i.test(label))) {
+    return "blacksmith";
+  }
+  return kind;
 }
 
 function stateOf(job: Job): LaneState {
@@ -97,9 +117,6 @@ function rollUp(states: LaneState[]): LaneState {
 }
 
 function lanesOf(jobs: Job[]): Lane[] {
-  if (jobs.length === 0) {
-    return config.lanes.map((rule) => ({ name: rule.name, state: "wait" as LaneState }));
-  }
   const buckets = new Map<string, LaneState[]>();
   for (const job of jobs) {
     const lane = laneOf(job.name);
@@ -135,7 +152,10 @@ async function jobsFor(run: Run): Promise<Job[]> {
 }
 
 function failureOf(jobs: Job[]): FailureReport | undefined {
-  const failed = jobs.filter((job) => job.status === "completed" && stateOf(job) === "fail");
+  const all = jobs.filter((job) => job.status === "completed" && stateOf(job) === "fail");
+  // quality-gate and friends fail because something else failed. Name the cause, not the echo.
+  const real = all.filter((job) => !isControlJob(job.name));
+  const failed = real.length > 0 ? real : all;
   if (failed.length === 0) return undefined;
   return {
     headline: failed.length === 1 ? `${failed[0].name} failed` : `${failed.length} jobs failed`,
@@ -194,43 +214,39 @@ async function mergeQueue(): Promise<QueueNode[]> {
   });
 }
 
-async function deploySteps(statuses: DeploymentStatus[]): Promise<DeployStep[]> {
+function stepOf(job: Job): DeployStep {
+  const state =
+    job.status !== "completed"
+      ? job.status === "queued"
+        ? "wait"
+        : "run"
+      : job.conclusion === "success"
+        ? "done"
+        : "wait";
+  return { label: job.name, state };
+}
+
+async function deploySteps(statuses: DeploymentStatus[], sha: string): Promise<DeployStep[]> {
   const runId = statuses
     .map((status) => status.description ?? "")
     .join(" ")
     .match(/runs\/(\d+)/)?.[1];
-  if (!runId) return [];
 
   try {
-    const jobs = await cached(`deploy-jobs:${runId}`, 20_000, async () => {
-      const data = await rest<{ jobs: Job[] }>(
-        `/repos/${REPO}/actions/runs/${runId}/jobs?per_page=30`,
-      );
-      return data.jobs;
-    });
-    return jobs.slice(0, 6).map((job) => ({
-      label: job.name,
-      state:
-        job.status !== "completed"
-          ? job.status === "queued"
-            ? "wait"
-            : "run"
-          : job.conclusion === "success"
-            ? "done"
-            : "wait",
-    }));
-  } catch {
-    return [];
-  }
-}
-
-async function deployJobsFor(sha: string): Promise<Job[]> {
-  try {
+    if (runId) {
+      const jobs = await cached(`deploy-jobs:${runId}`, 20_000, async () => {
+        const data = await rest<{ jobs: Job[] }>(
+          `/repos/${REPO}/actions/runs/${runId}/jobs?per_page=30`,
+        );
+        return data.jobs;
+      });
+      return jobs.slice(0, 6).map(stepOf);
+    }
     const runs = await cached(`depruns:${sha}`, 60_000, () =>
       rest<{ workflow_runs: Run[] }>(`/repos/${REPO}/actions/runs?head_sha=${sha}&per_page=10`),
     );
     const run = runs.workflow_runs.find((entry) => /deploy|build/i.test(entry.name));
-    return run ? await jobsFor(run) : [];
+    return run ? (await jobsFor(run)).slice(0, 6).map(stepOf) : [];
   } catch {
     return [];
   }
@@ -250,7 +266,7 @@ async function prFor(sha: string) {
 
 async function deploys(): Promise<{ deploying: BoardData["deploy"]; history: Deployment[] }> {
   const list = await cached("deployments", 45_000, () =>
-    rest<ApiDeployment[]>(`/repos/${REPO}/deployments?per_page=6`),
+    rest<ApiDeployment[]>(`/repos/${REPO}/deployments?per_page=10`),
   );
 
   const history: Deployment[] = [];
@@ -278,30 +294,19 @@ async function deploys(): Promise<{ deploying: BoardData["deploy"]; history: Dep
     const durationMinutes = Math.max(1, Math.round((ended - started) / 60_000));
     const pr = lowBudget() ? undefined : await prFor(deployment.sha);
 
-    if (!deploying && active) {
-      let steps = await deploySteps(statuses);
-      if (steps.length === 0) {
-        const jobs = await deployJobsFor(deployment.sha);
-        steps = jobs.slice(0, 6).map((job) => ({
-          label: job.name,
-          state:
-            job.status !== "completed"
-              ? job.status === "queued"
-                ? "wait"
-                : "run"
-              : job.conclusion === "success"
-                ? "done"
-                : "wait",
-        }));
+    if (active) {
+      if (!deploying) {
+        const steps = await deploySteps(statuses, deployment.sha);
+        const done = steps.filter((step) => step.state === "done").length;
+        deploying = {
+          environment: deployment.environment,
+          minutes: durationMinutes,
+          progress: steps.length ? Math.round((done / steps.length) * 100) : 15,
+          steps,
+          pr,
+        };
       }
-      const done = steps.filter((step) => step.state === "done").length;
-      deploying = {
-        environment: deployment.environment,
-        minutes: durationMinutes,
-        progress: steps.length ? Math.round((done / steps.length) * 100) : 15,
-        steps,
-        pr,
-      };
+      continue;
     }
 
     history.push({
@@ -317,50 +322,206 @@ async function deploys(): Promise<{ deploying: BoardData["deploy"]; history: Dep
   return { deploying, history };
 }
 
-async function mergedToday(): Promise<number> {
-  return cached("merged", 120_000, async () => {
-    const pulls = await rest<Pull[]>(`/repos/${REPO}/pulls?state=closed&per_page=40&sort=updated`);
-    const since = startOfDay(config.timezone);
-    return pulls.filter((pull) => pull.merged_at && new Date(pull.merged_at).getTime() >= since)
-      .length;
+interface PullNode {
+  number: number;
+  title: string;
+  url: string;
+  isDraft: boolean;
+  isInMergeQueue: boolean;
+  headRefName: string;
+  headRefOid: string;
+  updatedAt: string;
+  mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
+  author: { login: string } | null;
+  reviewThreads: { nodes: { isResolved: boolean }[] };
+  commits: { nodes: { commit: { committedDate: string } }[] };
+}
+
+async function openPulls(): Promise<PullNode[]> {
+  return cached("pulls", 30_000, async () => {
+    const [owner, name] = REPO.split("/");
+    const result = await graphql<{ repository: { pullRequests: { nodes: PullNode[] } } }>(
+      `
+        query ($owner: String!, $name: String!) {
+          repository(owner: $owner, name: $name) {
+            pullRequests(states: OPEN, first: 50, orderBy: { field: UPDATED_AT, direction: DESC }) {
+              nodes {
+                number
+                title
+                url
+                isDraft
+                isInMergeQueue
+                headRefName
+                headRefOid
+                updatedAt
+                mergeable
+                reviewDecision
+                author {
+                  login
+                }
+                reviewThreads(first: 50) {
+                  nodes {
+                    isResolved
+                  }
+                }
+                commits(last: 1) {
+                  nodes {
+                    commit {
+                      committedDate
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `,
+      { owner, name },
+    );
+    if (result.errors?.length) throw new Error(result.errors[0].message);
+    return result.data.repository.pullRequests.nodes;
   });
 }
 
-function minutesBetween(from: string, to: string): number {
-  return Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000));
+async function mergedSince(since: number): Promise<Merged[]> {
+  return cached("merged", 120_000, async () => {
+    const day = new Date(since).toISOString().slice(0, 10);
+    const result = await graphql<{
+      search: {
+        nodes: {
+          number?: number;
+          title: string;
+          createdAt: string;
+          mergedAt: string | null;
+          author: { login: string } | null;
+        }[];
+      };
+    }>(
+      `
+        query ($q: String!) {
+          search(query: $q, type: ISSUE, first: 100) {
+            nodes {
+              ... on PullRequest {
+                number
+                title
+                createdAt
+                mergedAt
+                author {
+                  login
+                }
+              }
+            }
+          }
+        }
+      `,
+      { q: `repo:${REPO} is:pr is:merged base:${BRANCH} merged:>=${day}` },
+    );
+    if (result.errors?.length) throw new Error(result.errors[0].message);
+    return result.data.search.nodes
+      .flatMap((node) =>
+        node.number && node.mergedAt
+          ? [
+              {
+                number: node.number,
+                title: node.title,
+                author: node.author?.login ?? "unknown",
+                createdAt: node.createdAt,
+                mergedAt: node.mergedAt,
+              },
+            ]
+          : [],
+      )
+      .sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
+  });
 }
 
-function toCard(pull: Pull, run: Run, jobs: Job[], lanes: Lane[]): PullRequest {
-  const started = run.run_started_at ?? run.created_at;
-  const finished = run.status === "completed";
+interface ApiRunner {
+  name: string;
+  status: "online" | "offline";
+  busy: boolean;
+}
+
+/** Self-hosted capacity. Needs admin on the repo; the board works without it. */
+async function runnerPools(): Promise<RunnerPool[] | null> {
+  try {
+    const data = await cached("runners", 30_000, () =>
+      rest<{ runners: ApiRunner[] }>(`/repos/${REPO}/actions/runners?per_page=100`),
+    );
+    const pools = new Map<MachineKind, RunnerPool>();
+    for (const runner of data.runners) {
+      const kind = machineOfName(runner.name);
+      const pool = pools.get(kind) ?? { kind, online: 0, busy: 0, total: 0 };
+      pool.total += 1;
+      if (runner.status === "online") pool.online += 1;
+      if (runner.busy) pool.busy += 1;
+      pools.set(kind, pool);
+    }
+    return [...pools.values()];
+  } catch {
+    return null;
+  }
+}
+
+function baseCard(node: PullNode): PullRequest {
   return {
-    number: `#${pull.number}`,
-    title: pull.title,
-    branch: pull.head.ref,
-    author: pull.user.login,
-    minutes: finished ? minutesBetween(started, run.updated_at) : minutesSince(started),
+    number: `#${node.number}`,
+    title: node.title,
+    branch: node.headRefName,
+    author: node.author?.login ?? "unknown",
+    url: node.url,
+    minutes: 0,
+    updatedAt: node.updatedAt,
+    lastCommitAt: node.commits.nodes[0]?.commit.committedDate ?? null,
+    machine: "github",
+    lanes: [],
+    jobs: { done: 0, total: 0 },
+    waiting: false,
+    conflict: node.mergeable === "CONFLICTING",
+    changesRequested: node.reviewDecision === "CHANGES_REQUESTED",
+    openThreads: node.reviewThreads.nodes.filter((thread) => !thread.isResolved).length,
+  };
+}
+
+function withRun(card: PullRequest, run: Run, jobs: Job[]): PullRequest {
+  const finished = run.status === "completed";
+  const started = jobs.filter((job) => job.status !== "queued");
+  const waiting = !finished && started.length === 0;
+  const since = waiting ? run.created_at : (run.run_started_at ?? run.created_at);
+  return {
+    ...card,
+    minutes: finished ? runMinutes(run) : minutesSince(since),
     updatedAt: run.updated_at,
     machine: machineOfRun(jobs),
-    lanes,
+    lanes: waiting ? [] : lanesOf(jobs),
+    jobs: { done: jobs.filter((job) => job.status === "completed").length, total: jobs.length },
+    waiting,
     failure: failureOf(jobs),
   };
 }
 
+const RECENT = 7 * 24 * 3_600_000;
+
 async function snapshot(): Promise<BoardData> {
-  const [viewer, pulls, runs, queueNodes, deployInfo, merged] = await Promise.all([
-    cached("viewer", 3_600_000, () => rest<{ login: string }>("/user")),
-    cached("pulls", 30_000, () =>
-      rest<Pull[]>(`/repos/${REPO}/pulls?state=open&per_page=50&sort=updated`),
-    ),
-    cached("runs", 20_000, () =>
-      rest<{ workflow_runs: Run[] }>(
-        `/repos/${REPO}/actions/workflows/${config.workflow}/runs?per_page=60`,
+  const [viewer, pulls, runs, mainRuns, queueNodes, deployInfo, merged, runners] =
+    await Promise.all([
+      cached("viewer", 3_600_000, () => rest<{ login: string }>("/user")),
+      openPulls(),
+      cached("runs", 20_000, () =>
+        rest<{ workflow_runs: Run[] }>(
+          `/repos/${REPO}/actions/workflows/${config.workflow}/runs?per_page=60`,
+        ),
       ),
-    ),
-    mergeQueue(),
-    deploys(),
-    mergedToday(),
-  ]);
+      cached("main-runs", 30_000, () =>
+        rest<{ workflow_runs: Run[] }>(
+          `/repos/${REPO}/actions/workflows/${config.workflow}/runs?branch=${BRANCH}&event=push&per_page=15`,
+        ),
+      ),
+      mergeQueue(),
+      deploys(),
+      mergedSince(Date.now() - 7 * 24 * 3_600_000),
+      runnerPools(),
+    ]);
 
   const queuedNumbers = new Set(queueNodes.map((node) => node.pullRequest.number));
 
@@ -386,8 +547,6 @@ async function snapshot(): Promise<BoardData> {
     (run) => run.event === "merge_group" && run.status !== "completed",
   );
 
-  const batch: BatchInfo | null = testing ? { done: 0, total: 0 } : null;
-
   const queue: QueueEntry[] = queueNodes.map((node) => ({
     number: `#${node.pullRequest.number}`,
     title: node.pullRequest.title,
@@ -397,91 +556,101 @@ async function snapshot(): Promise<BoardData> {
     ejectsInMinutes: node.estimatedTimeToMerge ?? undefined,
   }));
 
+  let batch: BatchInfo | null = null;
   if (testing && queue.length > 0) {
     const jobs = await jobsFor(testing).catch(() => []);
-    batch.done = jobs.filter((job) => job.status === "completed").length;
-    batch.total = jobs.length;
-    queue[0] = {
-      ...queue[0],
-      state: "testing",
-      progress: { done: batch.done, total: batch.total },
+    batch = {
+      done: jobs.filter((job) => job.status === "completed").length,
+      total: jobs.length,
     };
+    queue[0] = { ...queue[0], state: "testing", progress: batch };
   }
 
-  const candidates = pulls
-    .filter((pull) => !pull.draft && !queuedNumbers.has(pull.number))
-    .map((pull) => ({ pull, run: pickRun(pull.head.sha) }))
-    .filter((entry): entry is { pull: Pull; run: Run } => entry.run !== undefined);
+  const active = pulls.filter(
+    (node) => !node.isDraft && !node.isInMergeQueue && !queuedNumbers.has(node.number),
+  );
 
-  const cards = await mapLimit(candidates, 6, async ({ pull, run }) => {
+  const cards = await mapLimit(active, 6, async (node) => {
+    const run = pickRun(node.headRefOid);
+    if (!run) return { card: baseCard(node), run: undefined };
     try {
-      const jobs = await jobsFor(run);
-      return { card: toCard(pull, run, jobs, lanesOf(jobs)), run };
+      return { card: withRun(baseCard(node), run, await jobsFor(run)), run };
     } catch {
-      return null;
+      return { card: baseCard(node), run: undefined };
     }
   });
 
-  const needs: PullRequest[] = [];
+  const failing: PullRequest[] = [];
   const running: PullRequest[] = [];
   const ready: PullRequest[] = [];
+  const open: PullRequest[] = [];
 
-  for (const entry of cards) {
-    if (!entry) continue;
-    const { card, run } = entry;
-    const finished = run.status === "completed";
-
+  for (const { card, run } of cards) {
+    const recent = Date.now() - new Date(card.lastCommitAt ?? card.updatedAt).getTime() < RECENT;
+    if (recent) open.push(card);
+    if (!run || card.conflict) continue;
     if (card.failure) {
-      if (run.conclusion !== "cancelled") needs.push(card);
-      continue;
-    }
-
-    if (!finished) {
+      if (run.conclusion !== "cancelled") failing.push(card);
+    } else if (run.status !== "completed") {
       running.push(card);
-      continue;
+    } else if (run.conclusion === "success" && !card.changesRequested) {
+      ready.push(card);
     }
-
-    if (run.conclusion === "success" && ready.length < config.readyLimit) ready.push(card);
   }
 
-  const runnerCounts: Record<MachineKind, number> = { github: 0, home: 0, m4: 0, blacksmith: 0 };
-  if (!lowBudget()) {
-    const recent = runs.workflow_runs
-      .filter((run) => Date.now() - new Date(run.created_at).getTime() < 3_600_000)
-      .slice(0, 8);
-    await mapLimit(recent, 4, async (run) => {
-      try {
-        for (const job of await jobsFor(run)) {
-          if (job.status === "queued") continue;
-          runnerCounts[machineOf(job)] += 1;
-        }
-      } catch {
-        // one unreadable run must not blank the board
-      }
-    });
-  }
+  const waitingRuns = runs.workflow_runs
+    .filter(
+      (run) => run.status === "queued" || run.status === "waiting" || run.status === "pending",
+    )
+    .map((run) => ({ createdAt: run.created_at }));
+
+  const greenDeploys = deployInfo.history
+    .filter((deployment) => deployment.status === "live")
+    .map((deployment) => deployment.durationMinutes);
+
+  const mergeTimes = mergeStats(merged, Date.now());
 
   return {
     viewer: viewer.login,
     clock: zonedClock(config.timezone),
-    updatedSeconds: 0,
-    averageWaitMinutes: queue.length
-      ? Math.round(queue.reduce((sum, entry) => sum + entry.waitMinutes, 0) / queue.length)
-      : 0,
-    mergedToday: merged,
-    laneNames: config.lanes.map((lane) => lane.name),
-    maxPerColumn: config.maxPerColumn,
-    needs: needs.slice(0, 5),
-    running: running.slice(0, 6),
-    ready,
+    main: mainState(BRANCH, mainRuns.workflow_runs),
+    mergedDay: mergeTimes.day,
+    mergedWeekAverage: mergeTimes.weekAverage,
+    shippedTypical:
+      merged.length >= 3
+        ? percentile(
+            merged.map((pull) => minutesBetween(pull.createdAt, pull.mergedAt)),
+            0.5,
+          )
+        : null,
+    shipped: merged.slice(0, config.shippedLimit).map((pull) => ({
+      number: `#${pull.number}`,
+      title: pull.title,
+      author: pull.author,
+      mergedAt: pull.mergedAt,
+      openMinutes: minutesBetween(pull.createdAt, pull.mergedAt),
+    })),
+    ci: ciTiming(runs.workflow_runs),
+    deployTypical: greenDeploys.length >= 3 ? percentile(greenDeploys, 0.5) : null,
+    attention: attention({
+      failing,
+      open,
+      waitingRuns,
+      runners,
+      latestDeploy: deployInfo.history[0] ?? null,
+      now: Date.now(),
+      backlogMinutes: config.backlogMinutes,
+      systemicCount: config.systemicCount,
+      idleMinutes: config.idleMinutes,
+    }),
+    ready: ready.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)).slice(0, config.readyLimit),
+    running: running.sort((a, b) => Number(a.waiting) - Number(b.waiting) || b.minutes - a.minutes),
     queue,
     batch,
     deploy: deployInfo.deploying,
-    deployments: deployInfo.history,
-    runners: (["github", "home", "m4", "blacksmith"] as MachineKind[]).map((kind) => ({
-      kind,
-      jobs: runnerCounts[kind],
-    })),
+    live: livePerEnvironment(deployInfo.history),
+    runners,
+    waitingRuns: waitingRuns.length,
   };
 }
 

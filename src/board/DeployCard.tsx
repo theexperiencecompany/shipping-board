@@ -1,71 +1,55 @@
-import { AuthorAvatar } from "./AuthorAvatar";
-import { Icon } from "./Icon";
+import type { IconName } from "../icons";
 import { cn } from "./cn";
+import { Icon } from "./Icon";
 import { duration } from "./time";
 import type { Deploy, DeployStep } from "./types";
 
-const STEP: Record<DeployStep["state"], { tone: string; icon?: string; spin?: boolean }> = {
+const STEP: Record<DeployStep["state"], { tone: string; icon?: IconName; spin?: boolean }> = {
   done: { tone: "text-ok", icon: "i-tick" },
-  run: { tone: "text-warn", icon: "i-spin", spin: true },
-  wait: { tone: "text-[#6b6b74]" },
+  run: { tone: "text-accent", icon: "i-spin", spin: true },
+  wait: { tone: "text-ink-3" },
 };
 
-export function DeployCard({ deploy }: { deploy: Deploy }) {
+export function DeployCard({ deploy, typical }: { deploy: Deploy; typical: number | null }) {
   return (
-    <article className="rise flex flex-col gap-[7px] rounded-xl bg-card px-[13px] pt-3 pb-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.032)]">
-      <div className="flex items-center gap-1.5">
-        <span className="inline-flex h-[18px] items-center gap-1 rounded-[5px] bg-accent/15 px-[6px] text-[10.5px] font-medium text-accent">
-          <Icon name="i-deploy" className="size-2.5" />
-          Deploying
-        </span>
-        <span className="inline-flex h-[18px] items-center rounded-[5px] bg-white/6 px-1.5 text-[10.5px] text-ink-2">
-          {deploy.environment}
-        </span>
-        <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-ink-3">
-          <Icon name="i-clock" className="size-2.5" />
-          {duration(deploy.minutes)}
+    <article
+      data-item
+      className="rise flex shrink-0 flex-col gap-[0.4rem] rounded-[0.8rem] bg-card px-[0.9rem] py-[0.7rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+    >
+      <div className="flex items-center gap-2 text-[0.85rem]">
+        <Icon name="i-deploy" className="size-[0.85rem] text-accent" />
+        <span className="font-semibold text-accent">Deploying to {deploy.environment}</span>
+        <span className="ml-auto text-ink-3">
+          {typical && `usually ${duration(typical)} · `}
+          <b className="text-[1.05rem] font-semibold text-ink">{duration(deploy.minutes)}</b>
         </span>
       </div>
 
-      <p className="line-clamp-2 text-[13px] leading-[1.35] font-medium tracking-[-0.008em]">
-        {deploy.pr?.title ?? "Deployment"}
-      </p>
+      <h3 className="line-clamp-2 text-[1.05rem] leading-[1.25] font-semibold tracking-[-0.012em]">
+        {deploy.pr ? `${deploy.pr.title}` : "Deployment"}
+      </h3>
 
-      <div className="h-[3px] overflow-hidden rounded-sm bg-[#0b1018]">
-        <div className="h-full rounded-sm bg-accent" style={{ width: `${deploy.progress}%` }} />
+      <div className="h-[0.3rem] overflow-hidden rounded-full bg-[#0b1018]">
+        <div className="h-full rounded-full bg-accent" style={{ width: `${deploy.progress}%` }} />
       </div>
 
-      {deploy.pr && (
-        <p className="flex items-center gap-1.5 text-[11px] text-ink-3">
-          <AuthorAvatar name={deploy.pr.author} size={14} />
-          {deploy.pr.number}
-          <span className="text-ink-3">by {deploy.pr.author}</span>
-        </p>
-      )}
-
-      {deploy.steps.length > 0 ? (
-        <div className="mt-0.5 flex flex-col gap-2 border-t border-[#121a26] pt-2.5">
+      {deploy.steps.length > 0 && (
+        <div className="flex flex-wrap gap-x-[0.9rem] gap-y-1 text-[0.85rem]">
           {deploy.steps.map((step) => {
             const state = STEP[step.state];
             return (
-              <div key={step.label} className="flex items-center gap-1.5 text-[11.5px]">
+              <span key={step.label} className={cn("flex items-center gap-1", state.tone)}>
                 {state.icon ? (
-                  <Icon
-                    name={state.icon as never}
-                    className={cn("size-2.5 shrink-0", state.tone, state.spin && "spin")}
-                  />
+                  <Icon name={state.icon} className={cn("size-[0.8rem]", state.spin && "spin")} />
                 ) : (
-                  <span className={cn("h-px w-2.5 shrink-0 bg-current", state.tone)} />
+                  <span className="size-[0.7rem] rounded-full border-[1.5px] border-current" />
                 )}
-                <span className={step.state === "wait" ? "text-ink-3" : "text-ink-2"}>
-                  {step.label}
-                </span>
-                {step.note && <span className="ml-auto text-[11px] text-ink-3">{step.note}</span>}
-              </div>
+                {step.label}
+              </span>
             );
           })}
         </div>
-      ) : null}
+      )}
     </article>
   );
 }

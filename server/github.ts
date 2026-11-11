@@ -106,17 +106,6 @@ export interface Job {
   html_url: string;
 }
 
-export interface Pull {
-  number: number;
-  title: string;
-  draft: boolean;
-  merged_at: string | null;
-  user: { login: string };
-  head: { ref: string; sha: string };
-  updated_at: string;
-  html_url: string;
-}
-
 export interface Deployment {
   id: number;
   environment: string;

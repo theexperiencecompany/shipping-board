@@ -41,6 +41,8 @@ export function boardApi(): Plugin {
   return {
     name: "board-api",
     configureServer(server) {
+      // Vitest boots a Vite server too. Tests must not call GitHub.
+      if (server.config.mode === "test") return;
       void loadBoard().catch(() => {});
       server.middlewares.use(handler);
     },
