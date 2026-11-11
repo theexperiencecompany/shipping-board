@@ -488,7 +488,12 @@ export const rateStatus = () => rate;
 
 export async function jobLog(jobId: number, full = false): Promise<string> {
   return cached(`log:${jobId}:${full ? "full" : "tail"}`, 600_000, async () => {
-    const text = await restText(`/repos/${REPO}/actions/jobs/${jobId}/logs`);
+    let text: string;
+    try {
+      text = await restText(`/repos/${REPO}/actions/jobs/${jobId}/logs`);
+    } catch (error) {
+      return `GitHub did not return a log for this job. ${error instanceof Error ? error.message : ""}`.trim();
+    }
     if (full) return text;
     const lines = text.split("\n");
     return lines.slice(Math.max(0, lines.length - config.logTailLines)).join("\n");
