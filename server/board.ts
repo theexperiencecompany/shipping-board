@@ -19,7 +19,6 @@ import {
   livePerEnvironment,
   mainState,
   type Merged,
-  errorLine,
   mergeStats,
   percentile,
   runMinutes,
@@ -493,18 +492,6 @@ async function hostedLoad(): Promise<HostedLoad | null> {
   }
 }
 
-/** One line saying what broke, read from the job's log. Finished logs never change. */
-async function failureSummary(jobId: number): Promise<string | undefined> {
-  const line = await cached(`summary:${jobId}`, Number.POSITIVE_INFINITY, async () => {
-    try {
-      return errorLine(await restText(`/repos/${REPO}/actions/jobs/${jobId}/logs`));
-    } catch {
-      return null;
-    }
-  });
-  return line ?? undefined;
-}
-
 function baseCard(node: PullNode): PullRequest {
   return {
     number: `#${node.number}`,
@@ -645,17 +632,9 @@ async function snapshot(): Promise<BoardData> {
     else if (run.conclusion === "success") ready.push(card);
   }
 
-  if (!lowBudget()) {
-    const jobs = failing.flatMap((card) => card.failure?.jobs ?? []);
-    await mapLimit(jobs, 4, async (job) => {
-      job.summary = await failureSummary(job.id);
-    });
-  }
-
-  const waitingRuns = runs.workflow_runs
-    // "waiting" means an environment approval, not a missing runner.
-    .filter((run) => run.status === "queued" || run.status === "pending")
-    .map((run) => ({ createdAt: run.created_at }));
+  // A run no runner has picked up for a while needs you; a fresh one is just queued.
+  const stuck = (pr: PullRequest) => pr.waiting && pr.minutes >= config.backlogMinutes;
+  const notStarted = running.filter(stuck);
 
   const greenDeploys = deployInfo.history
     .filter((deployment) => deployment.status === "live")
@@ -691,24 +670,23 @@ async function snapshot(): Promise<BoardData> {
       main,
       failing,
       open,
-      waitingRuns,
+      notStarted,
       runners,
       hosted,
       latestDeploy: deployInfo.history[0] ?? null,
       now: Date.now(),
-      backlogMinutes: config.backlogMinutes,
-      systemicCount: config.systemicCount,
       idleMinutes: config.idleMinutes,
     }),
     ready: ready.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)).slice(0, config.readyLimit),
-    running: running.sort((a, b) => Number(a.waiting) - Number(b.waiting) || b.minutes - a.minutes),
+    running: running
+      .filter((pr) => !stuck(pr))
+      .sort((a, b) => Number(a.waiting) - Number(b.waiting) || b.minutes - a.minutes),
     queue,
     batch,
     deploy: deployInfo.deploying,
     live: livePerEnvironment(deployInfo.history),
     runners,
     hosted,
-    waitingRuns: waitingRuns.length,
     night: isQuietHour(zoneParts(config.timezone).hour),
   };
 }

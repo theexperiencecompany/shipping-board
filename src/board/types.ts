@@ -12,8 +12,6 @@ export interface FailureJob {
   name: string;
   conclusion: string | null;
   url: string;
-  /** The first error line the job printed, when its log names one. */
-  summary?: string;
 }
 
 export interface FailureReport {
@@ -47,25 +45,19 @@ export interface PullRequest {
 }
 
 /** Why something sits in the "Needs you" column. Ordered by severity. */
-export type AttentionKind =
-  | "main"
-  | "deploy"
-  | "backlog"
-  | "systemic"
-  | "failing"
-  | "conflict"
-  | "changes";
+export type AttentionKind = "main" | "deploy" | "failing" | "stuck" | "conflict" | "changes";
 
 export interface Attention {
   kind: AttentionKind;
   key: string;
   title: string;
-  detail: string;
+  /** Red lanes, for a failing PR: lint, build, test, e2e. */
+  lanes?: string[];
+  /** One short line of context, when there is something worth saying. */
+  note?: string;
   /** ISO time the problem started, so the board can show how long it has lasted. */
   since: string;
   pr?: PullRequest;
-  /** Pull requests a shared problem touches. */
-  refs?: string[];
 }
 
 export type QueueState = "testing" | "queued";
@@ -175,7 +167,6 @@ export interface BoardData {
   live: Deployment[];
   runners: RunnerPool[] | null;
   hosted: HostedLoad | null;
-  waitingRuns: number;
   /** Quiet hours on the board's clock, when everything but Needs you dims. */
   night: boolean;
 }

@@ -41,8 +41,6 @@ export const config = {
   shippedLimit: 12,
   /** A CI run that no runner has picked up for this long counts as stuck. */
   backlogMinutes: 15,
-  /** The same check failing on this many pull requests is one problem, not several. */
-  systemicCount: 3,
   /** Quiet hours on the board's clock, as BOARD_NIGHT="22-7". Everything but Needs you dims. */
   night: parseNight(process.env.BOARD_NIGHT ?? "22-7"),
   /** A failing pull request with no push for this long is flagged as abandoned. */

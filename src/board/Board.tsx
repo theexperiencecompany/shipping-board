@@ -103,7 +103,6 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
                 <span className="min-w-0 flex-1 truncate text-[1.05rem] font-semibold">
                   {pr.title}
                 </span>
-                <span className="shrink-0 text-[0.85rem] text-ink-3">{pr.number}</span>
                 <span className="shrink-0 text-[0.85rem] text-ink-2">
                   green for{" "}
                   <b className="text-[1.05rem] font-semibold text-ink">

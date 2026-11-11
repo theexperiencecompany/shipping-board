@@ -25,9 +25,7 @@ export function LiveStrip({ data, now }: { data: BoardData; now: number }) {
               {failed ? "failed" : "live"} {lasted(deployment.createdAt, now)}
             </span>
             {deployment.pr && (
-              <span className="min-w-0 truncate text-ink-3">
-                {deployment.pr.number} {deployment.pr.title}
-              </span>
+              <span className="min-w-0 truncate text-ink-3">{deployment.pr.title}</span>
             )}
             <span className="shrink-0 text-ink-3">
               · deployed in {duration(deployment.durationMinutes)}

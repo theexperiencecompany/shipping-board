@@ -64,7 +64,6 @@ export function RunningCard({
               {machine.short}
             </span>
           )}
-          <span>{pr.number}</span>
         </span>
       </div>
     </article>
