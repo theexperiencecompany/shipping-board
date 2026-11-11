@@ -16,9 +16,6 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
   const [hiddenLeft, setHiddenLeft] = useState(0);
   const [hiddenRight, setHiddenRight] = useState(0);
 
-  // Columns only for lanes that are red somewhere, so titles keep their room.
-  const red = new Set(data.attention.flatMap((item) => item.lanes ?? []));
-  const redLanes = data.laneNames.filter((lane) => red.has(lane));
   const moving = data.running.length + data.queue.length + (data.deploy ? 1 : 0);
   const clear = data.attention.length === 0;
 
@@ -47,7 +44,6 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
                   key={item.key}
                   item={item}
                   viewer={data.viewer}
-                  laneNames={redLanes}
                   now={now}
                   index={index}
                   onFailure={setFailure}

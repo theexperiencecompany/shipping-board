@@ -148,8 +148,6 @@ export interface Shipped {
 export interface BoardData {
   viewer: string;
   clock: string;
-  /** CI lanes in display order, so failing lanes line up in columns. */
-  laneNames: string[];
   main: MainBranch;
   /** Merged in the last 24 hours. */
   mergedDay: number;
