@@ -6,7 +6,9 @@
     "dev": "vp dev",
     "build": "vp build",
     "preview": "vp preview",
-    "lint": "vp lint"
+    "lint": "vp lint",
+    "test": "vp test",
+    "check": "vp check"
   },
   "dependencies": {
     "react": "^19.3.1",

@@ -11,6 +11,7 @@ import type {
   QueueEntry,
 } from "../src/board/types";
 import { config, isControlJob, laneOf } from "./config";
+import { startOfDay, zonedClock } from "./time";
 import {
   graphql,
   lowBudget,
@@ -74,11 +75,10 @@ function minutesSince(iso: string | null): number {
 
 function machineOf(job: Job): MachineKind {
   const name = job.runner_name ?? "";
-  if (name.startsWith("gaia-home-")) return "home";
-  if (name.startsWith("gaia-m4-")) return "m4";
-  if (name.startsWith("blacksmith") || job.labels.some((label) => /blacksmith/i.test(label))) {
-    return "blacksmith";
+  for (const rule of config.machines) {
+    if (rule.runner.some((pattern) => pattern.test(name))) return rule.kind;
   }
+  if (job.labels.some((label) => /blacksmith/i.test(label))) return "blacksmith";
   return "github";
 }
 
@@ -221,6 +221,18 @@ async function deploySteps(statuses: DeploymentStatus[]): Promise<DeployStep[]> 
   }
 }
 
+async function deployJobsFor(sha: string): Promise<Job[]> {
+  try {
+    const runs = await cached(`depruns:${sha}`, 60_000, () =>
+      rest<{ workflow_runs: Run[] }>(`/repos/${REPO}/actions/runs?head_sha=${sha}&per_page=10`),
+    );
+    const run = runs.workflow_runs.find((entry) => /deploy|build/i.test(entry.name));
+    return run ? await jobsFor(run) : [];
+  } catch {
+    return [];
+  }
+}
+
 async function prFor(sha: string) {
   return cached(`pr:${sha}`, 3_600_000, async () => {
     const pulls = await rest<
@@ -264,7 +276,21 @@ async function deploys(): Promise<{ deploying: BoardData["deploy"]; history: Dep
     const pr = lowBudget() ? undefined : await prFor(deployment.sha);
 
     if (!deploying && active) {
-      const steps = await deploySteps(statuses);
+      let steps = await deploySteps(statuses);
+      if (steps.length === 0) {
+        const jobs = await deployJobsFor(deployment.sha);
+        steps = jobs.slice(0, 6).map((job) => ({
+          label: job.name,
+          state:
+            job.status !== "completed"
+              ? job.status === "queued"
+                ? "wait"
+                : "run"
+              : job.conclusion === "success"
+                ? "done"
+                : "wait",
+        }));
+      }
       const done = steps.filter((step) => step.state === "done").length;
       deploying = {
         environment: deployment.environment,
@@ -291,11 +317,9 @@ async function deploys(): Promise<{ deploying: BoardData["deploy"]; history: Dep
 async function mergedToday(): Promise<number> {
   return cached("merged", 120_000, async () => {
     const pulls = await rest<Pull[]>(`/repos/${REPO}/pulls?state=closed&per_page=40&sort=updated`);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return pulls.filter(
-      (pull) => pull.merged_at && new Date(pull.merged_at).getTime() >= today.getTime(),
-    ).length;
+    const since = startOfDay(config.timezone);
+    return pulls.filter((pull) => pull.merged_at && new Date(pull.merged_at).getTime() >= since)
+      .length;
   });
 }
 
@@ -436,13 +460,14 @@ async function snapshot(): Promise<BoardData> {
 
   return {
     viewer: viewer.login,
-    clock: new Date().toTimeString().slice(0, 5),
+    clock: zonedClock(config.timezone),
     updatedSeconds: 0,
     averageWaitMinutes: queue.length
       ? Math.round(queue.reduce((sum, entry) => sum + entry.waitMinutes, 0) / queue.length)
       : 0,
     mergedToday: merged,
     laneNames: config.lanes.map((lane) => lane.name),
+    maxPerColumn: config.maxPerColumn,
     needs: needs.slice(0, 5),
     running: running.slice(0, 6),
     ready,
@@ -461,10 +486,11 @@ export const loadBoard = () => cached("board", config.cacheMs, snapshot);
 
 export const rateStatus = () => rate;
 
-export async function jobLog(jobId: number): Promise<string> {
-  return cached(`log:${jobId}`, 600_000, async () => {
+export async function jobLog(jobId: number, full = false): Promise<string> {
+  return cached(`log:${jobId}:${full ? "full" : "tail"}`, 600_000, async () => {
     const text = await restText(`/repos/${REPO}/actions/jobs/${jobId}/logs`);
+    if (full) return text;
     const lines = text.split("\n");
-    return lines.slice(Math.max(0, lines.length - 120)).join("\n");
+    return lines.slice(Math.max(0, lines.length - config.logTailLines)).join("\n");
   });
 }

@@ -84,7 +84,7 @@ export interface RunnerLoad {
 export interface BatchInfo {
   done: number;
   total: number;
-  minutesLeft?: number;
+  members: string[];
 }
 
 export interface BoardData {
@@ -94,6 +94,7 @@ export interface BoardData {
   averageWaitMinutes: number;
   mergedToday: number;
   laneNames: string[];
+  maxPerColumn: number;
   needs: PullRequest[];
   running: PullRequest[];
   ready: PullRequest[];

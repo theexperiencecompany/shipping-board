@@ -101,6 +101,7 @@ export default function App() {
       <main className="flex min-h-0 flex-1 flex-col">
         <QueueBand
           entries={view.queue}
+          batch={view.batch}
           averageWaitMinutes={view.averageWaitMinutes}
           mergedToday={view.mergedToday}
         />

@@ -20,6 +20,7 @@ const controlJobs = [
 export const config = {
   repo: process.env.BOARD_REPO ?? "theexperiencecompany/gaia",
   branch: process.env.BOARD_BRANCH ?? "master",
+  timezone: process.env.BOARD_TZ ?? "Asia/Kolkata",
   workflow: process.env.BOARD_WORKFLOW ?? "ci.yml",
   controlJobs,
   lanes: [
@@ -29,8 +30,15 @@ export const config = {
     { name: "test", match: [/^test-/, /mutation/, /coverage/] },
   ] as LaneRule[],
   readyLimit: 4,
+  maxPerColumn: 5,
+  logTailLines: 120,
   pollMs: 15_000,
   cacheMs: 20_000,
+  machines: [
+    { kind: "home", runner: [/^gaia-home-/, /^gaia-home$/] },
+    { kind: "m4", runner: [/^gaia-m4-/, /^gaia-m4$/] },
+    { kind: "blacksmith", runner: [/^blacksmith/] },
+  ],
 } as const;
 
 export function laneOf(jobName: string): string | null {

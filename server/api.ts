@@ -16,7 +16,8 @@ function handler(request: { url?: string }, response: any, next: () => void) {
           response.end("missing job");
           return;
         }
-        const log = await jobLog(id);
+        const full = new URL(request.url!, "http://x").searchParams.get("full") === "1";
+        const log = await jobLog(id, full);
         response.setHeader("content-type", "text/plain; charset=utf-8");
         response.end(log);
         return;

@@ -2,14 +2,16 @@ import { AuthorAvatar } from "./AuthorAvatar";
 import { Icon } from "./Icon";
 import { cn } from "./cn";
 import { duration } from "./time";
-import type { QueueEntry } from "./types";
+import type { BatchInfo, QueueEntry } from "./types";
 
 export function QueueBand({
   entries,
+  batch,
   averageWaitMinutes,
   mergedToday,
 }: {
   entries: QueueEntry[];
+  batch: BatchInfo | null;
   averageWaitMinutes: number;
   mergedToday: number;
 }) {
@@ -39,7 +41,9 @@ export function QueueBand({
         ) : (
           <>
             <p className="pb-2 pl-0.5 text-[11px] text-ink-3">
-              GitHub tests a batch together, then merges all of it or none of it.
+              {batch && batch.members.length > 0
+                ? `Batch of ${batch.members.length} testing together: ${batch.members.join(" ")}.`
+                : "GitHub tests a batch together, then merges all of it or none of it."}
             </p>
             <table className="w-full table-fixed border-collapse">
               <colgroup>

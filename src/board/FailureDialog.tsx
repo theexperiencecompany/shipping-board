@@ -31,6 +31,13 @@ function JobBlock({ job, log }: { job: FailureJob; log: string }) {
         </span>
         <span className="text-[11px] text-ink-3">{job.conclusion ?? "failed"}</span>
         <span className="ml-auto flex gap-1.5">
+          <a
+            href={`/api/failure?job=${job.id}&full=1`}
+            download={`${job.name.replace(/[^a-z0-9]+/gi, "-")}.log`}
+            className="inline-flex h-6 shrink-0 items-center rounded-[6px] bg-card-hi px-2 text-[11px] font-medium whitespace-nowrap text-ink-2 hover:text-ink"
+          >
+            Download
+          </a>
           <CopyButton text={log} label="Copy log" />
         </span>
       </div>

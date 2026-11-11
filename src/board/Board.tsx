@@ -7,8 +7,6 @@ import { Icon } from "./Icon";
 import { PrCard } from "./PrCard";
 import type { BoardData, FailureReport } from "./types";
 
-const MAX_PER_COLUMN = 5;
-
 function Empty({ label }: { label: string }) {
   return (
     <div className="flex flex-1 items-center justify-center py-6">
@@ -20,12 +18,13 @@ function Empty({ label }: { label: string }) {
 export function Board({ data }: { data: BoardData; viewer: string }) {
   const [failure, setFailure] = useState<FailureReport | null>(null);
 
-  const needs = data.needs.slice(0, MAX_PER_COLUMN);
-  const running = data.running.slice(0, MAX_PER_COLUMN);
+  const cap = data.maxPerColumn;
+  const needs = data.needs.slice(0, cap);
+  const running = data.running.slice(0, cap);
   const ready = data.ready;
-  const deployments = data.deployments.slice(0, MAX_PER_COLUMN);
+  const deployments = data.deployments.slice(0, cap);
   const checks = running.length + ready.length;
-  const more = Math.max(0, data.running.length + data.ready.length - MAX_PER_COLUMN);
+  const more = Math.max(0, data.running.length + data.ready.length - cap);
 
   return (
     <>

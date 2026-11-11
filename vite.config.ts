@@ -4,6 +4,7 @@ import { defineConfig } from "vite-plus";
 import { boardApi } from "./server/api";
 
 export default defineConfig({
+  test: { include: ["**/*.test.ts"], environment: "node" },
   plugins: [react(), tailwindcss(), boardApi()],
   server: {
     host: "127.0.0.1",
