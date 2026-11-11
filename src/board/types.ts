@@ -12,6 +12,8 @@ export interface FailureJob {
   name: string;
   conclusion: string | null;
   url: string;
+  /** The first error line the job printed, when its log names one. */
+  summary?: string;
 }
 
 export interface FailureReport {
@@ -62,6 +64,8 @@ export interface Attention {
   /** ISO time the problem started, so the board can show how long it has lasted. */
   since: string;
   pr?: PullRequest;
+  /** Pull requests a shared problem touches. */
+  refs?: string[];
 }
 
 export type QueueState = "testing" | "queued";
@@ -111,6 +115,13 @@ export interface RunnerPool {
   online: number;
   busy: number;
   total: number;
+}
+
+/** GitHub-hosted runners: jobs running now against the plan's concurrency limit. */
+export interface HostedLoad {
+  running: number;
+  limit: number;
+  plan: string;
 }
 
 export interface BatchInfo {
@@ -163,5 +174,8 @@ export interface BoardData {
   /** Newest deployment per environment. */
   live: Deployment[];
   runners: RunnerPool[] | null;
+  hosted: HostedLoad | null;
   waitingRuns: number;
+  /** Quiet hours on the board's clock, when everything but Needs you dims. */
+  night: boolean;
 }

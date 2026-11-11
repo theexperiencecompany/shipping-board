@@ -16,7 +16,7 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
   const [hiddenRight, setHiddenRight] = useState(0);
 
   const moving = data.running.length + data.queue.length + (data.deploy ? 1 : 0);
-  const clear = data.attention.length === 0 && data.ready.length === 0;
+  const clear = data.attention.length === 0;
 
   return (
     <>
@@ -24,7 +24,7 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
         <Column
           icon={clear ? "i-tick" : "i-alert"}
           label="Needs you"
-          count={data.attention.length + data.ready.length}
+          count={data.attention.length}
           tone={data.attention.length > 0 ? "danger" : "ok"}
           hidden={clear ? 0 : hiddenLeft}
         >
@@ -33,7 +33,7 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
               <Icon name="i-tick" className="size-[2.2rem] text-ok" />
               <p className="text-[1.3rem] font-semibold text-ink">Nothing needs you</p>
               <p className="text-[0.9rem] text-ink-3">
-                Failures, stuck CI and green pull requests land here.
+                Failures, stuck CI and conflicts land here.
               </p>
             </div>
           ) : (
@@ -48,33 +48,6 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
                   onFailure={setFailure}
                 />
               ))}
-
-              {data.ready.length > 0 && (
-                <SubHead
-                  icon="i-tick"
-                  label="Green, waiting for you to merge"
-                  tone="text-ok"
-                  count={data.ready.length}
-                />
-              )}
-              {data.ready.map((pr) => (
-                <div
-                  key={pr.number}
-                  data-item
-                  className="flex shrink-0 items-center gap-3 rounded-[0.8rem] bg-ok-card px-[0.9rem] py-[0.55rem]"
-                >
-                  <span className="min-w-0 flex-1 truncate text-[1.05rem] font-semibold">
-                    {pr.title}
-                  </span>
-                  <span className="shrink-0 text-[0.85rem] text-ink-3">{pr.number}</span>
-                  <span className="shrink-0 text-[0.85rem] text-ink-2">
-                    green for{" "}
-                    <b className="text-[1.05rem] font-semibold text-ink">
-                      {lasted(pr.updatedAt, now)}
-                    </b>
-                  </span>
-                </div>
-              ))}
             </FitList>
           )}
         </Column>
@@ -83,6 +56,7 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
           icon="i-flowchart"
           label="In progress"
           count={moving}
+          note={data.ci ? `CI usually takes ${duration(data.ci.typical)}` : undefined}
           hidden={hiddenRight}
           className="quiet"
         >
@@ -112,6 +86,32 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
               </p>
             )}
 
+            {data.ready.length > 0 && (
+              <SubHead
+                icon="i-tick"
+                label="Green, waiting for you to merge"
+                tone="text-ok"
+                count={data.ready.length}
+              />
+            )}
+            {data.ready.map((pr) => (
+              <div
+                key={pr.number}
+                data-item
+                className="flex shrink-0 items-center gap-3 rounded-[0.8rem] bg-ok-card px-[0.9rem] py-[0.55rem]"
+              >
+                <span className="min-w-0 flex-1 truncate text-[1.05rem] font-semibold">
+                  {pr.title}
+                </span>
+                <span className="shrink-0 text-[0.85rem] text-ink-3">{pr.number}</span>
+                <span className="shrink-0 text-[0.85rem] text-ink-2">
+                  green for{" "}
+                  <b className="text-[1.05rem] font-semibold text-ink">
+                    {lasted(pr.updatedAt, now)}
+                  </b>
+                </span>
+              </div>
+            ))}
             {data.shipped.length > 0 && (
               <SubHead
                 icon="i-ship"

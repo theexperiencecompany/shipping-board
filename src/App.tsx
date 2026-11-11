@@ -24,13 +24,6 @@ function onlyMine(data: BoardData): BoardData {
   };
 }
 
-/** Midnight to 7am, unless ?night=on or ?night=off forces it. */
-function isNight(at: Date, force: string | null): boolean {
-  if (force === "on") return true;
-  if (force === "off") return false;
-  return at.getHours() < 7;
-}
-
 export default function App() {
   const [data, setData] = useState<BoardData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +84,10 @@ export default function App() {
 
   return (
     <div
-      className={cn("flex h-full flex-col", isNight(new Date(now), params.get("night")) && "night")}
+      className={cn(
+        "flex h-full flex-col",
+        (params.get("night") === "on" || (view.night && params.get("night") !== "off")) && "night",
+      )}
       style={{ transform: `translate(${shift[0]}px, ${shift[1]}px)` }}
     >
       <StatusStrip data={view} stale={stale ? syncedAt : null} error={error} now={now} />

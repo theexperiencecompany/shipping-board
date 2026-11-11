@@ -8,6 +8,7 @@ import type {
   LaneState,
   MachineKind,
   PullRequest,
+  HostedLoad,
   QueueEntry,
   RunnerPool,
 } from "../src/board/types";
@@ -18,11 +19,12 @@ import {
   livePerEnvironment,
   mainState,
   type Merged,
+  errorLine,
   mergeStats,
   percentile,
   runMinutes,
 } from "./signals";
-import { zonedClock } from "./time";
+import { zoneParts, zonedClock } from "./time";
 import {
   graphql,
   lowBudget,
@@ -76,6 +78,11 @@ async function mapLimit<T, R>(
   );
   await Promise.all(workers);
   return out;
+}
+
+function isQuietHour(hour: number): boolean {
+  const { start, end } = config.night;
+  return start > end ? hour >= start || hour < end : hour >= start && hour < end;
 }
 
 function minutesBetween(from: string, to: string): number {
@@ -463,6 +470,41 @@ async function runnerPools(): Promise<RunnerPool[] | null> {
   }
 }
 
+/** Concurrent GitHub-hosted jobs per plan, from GitHub's usage limits page. */
+const HOSTED_LIMIT: Record<string, number> = { free: 20, pro: 40, team: 60, enterprise: 500 };
+
+async function hostedLoad(): Promise<HostedLoad | null> {
+  try {
+    const owner = REPO.split("/")[0];
+    const plan = await cached("plan", 3_600_000, async () => {
+      const org = await rest<{ plan?: { name: string } }>(`/orgs/${owner}`);
+      return org.plan?.name ?? "free";
+    });
+    const active = await cached("active-runs", 20_000, () =>
+      rest<{ workflow_runs: Run[] }>(`/repos/${REPO}/actions/runs?status=in_progress&per_page=30`),
+    );
+    const jobs = await mapLimit(active.workflow_runs, 4, (run) => jobsFor(run).catch(() => []));
+    const running = jobs
+      .flat()
+      .filter((job) => job.status === "in_progress" && machineOf(job) === "github").length;
+    return { running, limit: HOSTED_LIMIT[plan] ?? 20, plan };
+  } catch {
+    return null;
+  }
+}
+
+/** One line saying what broke, read from the job's log. Finished logs never change. */
+async function failureSummary(jobId: number): Promise<string | undefined> {
+  const line = await cached(`summary:${jobId}`, Number.POSITIVE_INFINITY, async () => {
+    try {
+      return errorLine(await restText(`/repos/${REPO}/actions/jobs/${jobId}/logs`));
+    } catch {
+      return null;
+    }
+  });
+  return line ?? undefined;
+}
+
 function baseCard(node: PullNode): PullRequest {
   return {
     number: `#${node.number}`,
@@ -522,6 +564,7 @@ async function snapshot(): Promise<BoardData> {
       mergedSince(Date.now() - 7 * 24 * 3_600_000),
       runnerPools(),
     ]);
+  const hosted = lowBudget() ? null : await hostedLoad();
 
   const queuedNumbers = new Set(queueNodes.map((node) => node.pullRequest.number));
 
@@ -602,6 +645,13 @@ async function snapshot(): Promise<BoardData> {
     else if (run.conclusion === "success") ready.push(card);
   }
 
+  if (!lowBudget()) {
+    const jobs = failing.flatMap((card) => card.failure?.jobs ?? []);
+    await mapLimit(jobs, 4, async (job) => {
+      job.summary = await failureSummary(job.id);
+    });
+  }
+
   const waitingRuns = runs.workflow_runs
     // "waiting" means an environment approval, not a missing runner.
     .filter((run) => run.status === "queued" || run.status === "pending")
@@ -643,6 +693,7 @@ async function snapshot(): Promise<BoardData> {
       open,
       waitingRuns,
       runners,
+      hosted,
       latestDeploy: deployInfo.history[0] ?? null,
       now: Date.now(),
       backlogMinutes: config.backlogMinutes,
@@ -656,7 +707,9 @@ async function snapshot(): Promise<BoardData> {
     deploy: deployInfo.deploying,
     live: livePerEnvironment(deployInfo.history),
     runners,
+    hosted,
     waitingRuns: waitingRuns.length,
+    night: isQuietHour(zoneParts(config.timezone).hour),
   };
 }
 

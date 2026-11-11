@@ -10,6 +10,7 @@ export function Column({
   count,
   tone = "neutral",
   hidden = 0,
+  note,
   className,
   children,
 }: {
@@ -18,6 +19,7 @@ export function Column({
   count?: number;
   tone?: Tone;
   hidden?: number;
+  note?: string;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -42,9 +44,10 @@ export function Column({
         {count !== undefined && count > 0 && (
           <span className="text-[1.15rem] font-semibold text-ink-3">{count}</span>
         )}
-        {hidden > 0 && (
-          <span className="ml-auto text-[0.85rem] text-ink-3">{hidden} more not shown</span>
-        )}
+        <span className="ml-auto flex gap-3 text-[0.85rem] text-ink-3">
+          {note && <span>{note}</span>}
+          {hidden > 0 && <span>{hidden} more not shown</span>}
+        </span>
       </header>
       {children}
     </section>

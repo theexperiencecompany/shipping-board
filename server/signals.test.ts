@@ -3,6 +3,8 @@ import type { Deployment, MainBranch, PullRequest } from "../src/board/types";
 import type { Run } from "./github";
 import {
   attention,
+  backlogCause,
+  errorLine,
   ciTiming,
   jobFamily,
   livePerEnvironment,
@@ -71,6 +73,7 @@ const base = {
   open: [] as PullRequest[],
   waitingRuns: [] as { createdAt: string }[],
   runners: null,
+  hosted: null,
   latestDeploy: null,
   now: NOW,
   backlogMinutes: 15,
@@ -151,7 +154,47 @@ describe("attention", () => {
       title: "2 CI runs have not started",
       since: ago(90),
     });
-    expect(items[0].detail).toContain("Home server 0 of 10 busy");
+    expect(items[0].detail).toBe("Your runners are idle, so this is not a capacity problem.");
+  });
+
+  it("quotes the error a shared failure has in common", () => {
+    const withSummary = (number: number) => {
+      const card = failing(number, ["ts-build-test"]);
+      card.failure!.jobs[0].summary = "Cannot find module '@heroui/react'";
+      return card;
+    };
+    const items = attention({
+      ...base,
+      failing: [withSummary(1), withSummary(2), withSummary(3)],
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      title: "ts-build-test fails the same way on 3 pull requests",
+      detail: "Cannot find module '@heroui/react'",
+      refs: ["#1", "#2", "#3"],
+    });
+  });
+
+  it("keeps failures apart when their logs disagree", () => {
+    const withError = (number: number, summary: string) => {
+      const card = failing(number, ["mutation (a)"], { updatedAt: ago(number) });
+      card.failure!.jobs[0].summary = summary;
+      return card;
+    };
+    const items = attention({
+      ...base,
+      failing: [
+        withError(1, "a.py: 1 surviving mutant"),
+        withError(2, "b.py: 1 surviving mutant"),
+        withError(3, "c.py: 2 surviving mutants"),
+      ],
+    });
+    expect(items.map((item) => item.kind)).toEqual(["failing", "failing", "failing"]);
+    expect(items.map((item) => item.detail)).toEqual([
+      "a.py: 1 surviving mutant.",
+      "b.py: 1 surviving mutant.",
+      "c.py: 2 surviving mutants.",
+    ]);
   });
 
   it("folds a check failing on many PRs into one card", () => {
@@ -164,7 +207,7 @@ describe("attention", () => {
       ],
     });
     expect(items.map((item) => item.kind)).toEqual(["systemic", "failing"]);
-    expect(items[0].title).toBe("mutation fails on 3 pull requests");
+    expect(items[0].title).toBe("mutation fails the same way on 3 pull requests");
     expect(items[1]).toMatchObject({
       key: "failing:#3",
       detail: "lint-node failed. Nothing pushed since.",
@@ -208,6 +251,62 @@ describe("attention", () => {
       open: [pr(2, { conflict: true })],
     });
     expect(items.map((item) => item.kind)).toEqual(["deploy", "failing", "conflict"]);
+  });
+});
+
+describe("backlogCause", () => {
+  const home = { kind: "home" as const, online: 10, busy: 0, total: 10 };
+  const m4 = { kind: "m4" as const, online: 12, busy: 0, total: 12 };
+
+  it("blames an offline pool first", () => {
+    expect(backlogCause([home, { ...m4, online: 0 }], null)).toBe(
+      "M4 offline, so jobs meant for it cannot start.",
+    );
+  });
+
+  it("names the plan limit when GitHub is full", () => {
+    expect(backlogCause([home, m4], { running: 20, limit: 20, plan: "free" })).toBe(
+      "GitHub's 20-job limit on the free plan is full. They start as jobs finish.",
+    );
+  });
+
+  it("rules out capacity when everything has room", () => {
+    expect(backlogCause([home, m4], { running: 3, limit: 20, plan: "free" })).toContain(
+      "not capacity",
+    );
+  });
+});
+
+describe("errorLine", () => {
+  const log = (lines: string[]) =>
+    lines.map((line) => `2026-11-11T21:21:43.9217601Z ${line}`).join("\n");
+
+  it("skips lines that only point elsewhere", () => {
+    expect(
+      errorLine(
+        log([
+          "Run pnpm lint",
+          "##[error]lint-node/components-per-file: FAIL — its first error lines are attached",
+          "##[error]❌ components-per-file gate FAILED — 1 file(s) export more than 2 React components:",
+          "##[error]Process completed with exit code 1.",
+        ]),
+      ),
+    ).toBe("components-per-file gate: 1 file(s) export more than 2 React components:");
+  });
+
+  it("drops roll-ups and trims the mutation boilerplate", () => {
+    expect(
+      errorLine(
+        log([
+          "##[error]mutation/shard-1: FAIL — 2 of 4 module(s) did not pass: a.py b.py",
+          "##[error]mutation/a.py: FAIL — 1 surviving mutant(s) on 1 changed line(s) in a.py — the suite would not notice this code being wrong",
+        ]),
+      ),
+    ).toBe("mutation/a.py: 1 surviving mutant(s) on 1 changed line(s) in a.py");
+  });
+
+  it("returns nothing when the log has no real error", () => {
+    expect(errorLine(log(["##[error]Process completed with exit code 1."]))).toBeNull();
   });
 });
 

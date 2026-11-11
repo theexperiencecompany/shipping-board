@@ -2,6 +2,7 @@ import type {
   Attention,
   AttentionKind,
   Deployment,
+  HostedLoad,
   MainBranch,
   PullRequest,
   RunnerPool,
@@ -62,6 +63,29 @@ export function mainState(name: string, runs: Run[]): MainBranch {
   return { name, state, since };
 }
 
+const ERROR = /##\[error\](.*)$/;
+// Lines that only say "something failed, look elsewhere" carry no information of their own.
+const NOISE = [
+  /^Process completed with exit code/,
+  /: FAIL — \d+ of \d+ /,
+  /\b(above|below|attached)\W*$/,
+];
+
+/** The first error line in a GitHub Actions log that actually says what broke. */
+export function errorLine(log: string): string | null {
+  for (const raw of log.split("\n")) {
+    const match = raw.match(ERROR);
+    if (!match) continue;
+    const said = match[1].replace(/^[^\p{L}\p{N}]+/u, "").trim();
+    if (!said || NOISE.some((pattern) => pattern.test(said))) continue;
+    const line = said
+      .replace(/\s+—\s+the suite would not notice.*$/, "")
+      .replace(/:?\s+FAIL(ED)?\s+—\s+/, ": ");
+    return line.length > 300 ? `${line.slice(0, 299)}…` : line;
+  }
+  return null;
+}
+
 /** "mutation (shard 2/6 (4 modules))" and "mutation (app/x.py)" are the same check. */
 export function jobFamily(name: string): string {
   return name.replace(/\s*\(.*$/, "").trim();
@@ -83,6 +107,7 @@ export interface AttentionInput {
   open: PullRequest[];
   waitingRuns: { createdAt: string }[];
   runners: RunnerPool[] | null;
+  hosted: HostedLoad | null;
   latestDeploy: Deployment | null;
   now: number;
   backlogMinutes: number;
@@ -91,16 +116,27 @@ export interface AttentionInput {
   idleMinutes: number;
 }
 
-function poolText(runners: RunnerPool[] | null): string {
-  if (!runners) return "";
-  const self = runners.filter((pool) => pool.kind === "home" || pool.kind === "m4");
-  if (self.length === 0) return "";
-  const parts = self.map((pool) => {
-    const label = pool.kind === "home" ? "Home server" : "M4";
-    if (pool.online === 0) return `${label} offline`;
-    return `${label} ${pool.busy} of ${pool.online} busy`;
-  });
-  return ` ${parts.join(", ")}.`;
+/** Why queued runs are not starting, from what the runners are doing right now. */
+export function backlogCause(runners: RunnerPool[] | null, hosted: HostedLoad | null): string {
+  const self = (runners ?? []).filter((pool) => pool.kind === "home" || pool.kind === "m4");
+  const offline = self.filter((pool) => pool.online === 0);
+  const idle = self.length > 0 && self.every((pool) => pool.online > 0 && pool.busy < pool.online);
+  const full = hosted !== null && hosted.running >= hosted.limit;
+
+  if (offline.length > 0) {
+    const names = offline
+      .map((pool) => (pool.kind === "home" ? "Home server" : "M4"))
+      .join(" and ");
+    return `${names} offline, so jobs meant for ${offline.length === 1 ? "it" : "them"} cannot start.`;
+  }
+  if (full) {
+    return `GitHub's ${hosted.limit}-job limit on the ${hosted.plan} plan is full. They start as jobs finish.`;
+  }
+  if (idle && hosted) {
+    return `Your runners are idle and GitHub has room (${hosted.running} of ${hosted.limit} jobs), so this is not capacity. Re-run them.`;
+  }
+  if (idle) return "Your runners are idle, so this is not a capacity problem.";
+  return "Every runner is busy. They start as jobs finish.";
 }
 
 export function attention(input: AttentionInput): Attention[] {
@@ -140,44 +176,52 @@ export function attention(input: AttentionInput): Attention[] {
         stalled.length === 1
           ? "1 CI run has not started"
           : `${stalled.length} CI runs have not started`,
-      detail: `Queued with no job started.${poolText(input.runners)}`,
+      detail: backlogCause(input.runners, input.hosted),
       since: oldest.createdAt,
     });
   }
 
-  const families = new Map<string, Set<string>>();
+  // Group failures by what broke. With logs, that is the error line itself, so two PRs
+  // only share a card when they fail the same way. Without logs, fall back to the check.
+  const keyOf = (job: { name: string; summary?: string }) => job.summary ?? jobFamily(job.name);
+  const groups = new Map<string, { family: string; summary?: string; prs: PullRequest[] }>();
   for (const pr of input.failing) {
     for (const job of pr.failure?.jobs ?? []) {
-      const family = jobFamily(job.name);
-      const set = families.get(family) ?? new Set<string>();
-      set.add(pr.number);
-      families.set(family, set);
+      const key = keyOf(job);
+      const group = groups.get(key) ?? {
+        family: jobFamily(job.name),
+        summary: job.summary,
+        prs: [],
+      };
+      if (!group.prs.includes(pr)) group.prs.push(pr);
+      groups.set(key, group);
     }
   }
-  const systemic = new Set<string>();
-  for (const [family, prs] of families) {
-    if (prs.size < input.systemicCount) continue;
-    systemic.add(family);
-    const earliest = input.failing
-      .filter((pr) => prs.has(pr.number))
-      .reduce((a, b) => (a.updatedAt < b.updatedAt ? a : b));
+  const shared = new Set<string>();
+  for (const [key, group] of groups) {
+    const needed = group.summary ? 2 : input.systemicCount;
+    if (group.prs.length < needed) continue;
+    shared.add(key);
+    const earliest = group.prs.reduce((a, b) => (a.updatedAt < b.updatedAt ? a : b));
     items.push({
       kind: "systemic",
-      key: `systemic:${family}`,
-      title: `${family} fails on ${prs.size} pull requests`,
-      detail: `${[...prs].join(" ")}. Likely one cause, so check main or the job itself first.`,
+      key: `systemic:${key}`,
+      title: `${group.family} fails the same way on ${group.prs.length} pull requests`,
+      detail: group.summary ?? "No error line in the logs. Open one run and compare it with main.",
       since: earliest.updatedAt,
+      refs: group.prs.map((pr) => pr.number),
     });
   }
 
   for (const pr of input.failing) {
     const failure = pr.failure;
     if (!failure) continue;
-    const names = [...new Set(failure.jobs.map((job) => jobFamily(job.name)))];
-    const own = names.filter((name) => !systemic.has(name));
+    const own = failure.jobs.filter((job) => !shared.has(keyOf(job)));
     // Already named on a shared-failure card. A card of its own would only repeat it.
     if (own.length === 0) continue;
-    const label = `${own.join(", ")} failed`;
+    const reason = own.find((job) => job.summary)?.summary;
+    const families = [...new Set(own.map((job) => jobFamily(job.name)))];
+    const label = (reason ?? `${families.join(", ")} failed`).replace(/[\s.:;,]+$/, "");
     const touched = pr.lastCommitAt ? new Date(pr.lastCommitAt).getTime() : 0;
     const failedAt = new Date(pr.updatedAt).getTime();
     const idle = touched < failedAt && now - failedAt >= input.idleMinutes * MINUTE;
@@ -215,8 +259,9 @@ export function attention(input: AttentionInput): Attention[] {
     }
   }
 
+  // Newest first within a kind: a failure from ten minutes ago is the one an agent can still fix.
   return items.sort(
-    (a, b) => SEVERITY[a.kind] - SEVERITY[b.kind] || a.since.localeCompare(b.since),
+    (a, b) => SEVERITY[a.kind] - SEVERITY[b.kind] || b.since.localeCompare(a.since),
   );
 }
 
