@@ -599,9 +599,8 @@ async function snapshot(): Promise<BoardData> {
   }
 
   const waitingRuns = runs.workflow_runs
-    .filter(
-      (run) => run.status === "queued" || run.status === "waiting" || run.status === "pending",
-    )
+    // "waiting" means an environment approval, not a missing runner.
+    .filter((run) => run.status === "queued" || run.status === "pending")
     .map((run) => ({ createdAt: run.created_at }));
 
   const greenDeploys = deployInfo.history

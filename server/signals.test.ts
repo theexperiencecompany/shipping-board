@@ -169,6 +169,12 @@ describe("attention", () => {
     expect(second.detail).toBe("lint-node failed.");
   });
 
+  it("gives a pull request one card even when it has several problems", () => {
+    const both = failing(1, ["lint-node"], { changesRequested: true });
+    const items = attention({ ...base, failing: [both], open: [both] });
+    expect(items.map((item) => item.kind)).toEqual(["failing"]);
+  });
+
   it("puts a red main branch above everything", () => {
     const items = attention({
       ...base,
