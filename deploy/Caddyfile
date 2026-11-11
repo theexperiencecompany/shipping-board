@@ -1,0 +1,3 @@
+lab.heygaia.io {
+	reverse_proxy 127.0.0.1:5181
+}

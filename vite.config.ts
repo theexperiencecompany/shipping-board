@@ -5,4 +5,12 @@ import { boardApi } from "./server/api";
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), boardApi()],
+  server: {
+    host: "127.0.0.1",
+    allowedHosts: [".taila76294.ts.net", ".heygaia.io"],
+  },
+  preview: {
+    host: "127.0.0.1",
+    allowedHosts: [".taila76294.ts.net", ".heygaia.io"],
+  },
 });
