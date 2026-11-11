@@ -10,7 +10,7 @@ export default defineConfig({
     allowedHosts: [".taila76294.ts.net", ".heygaia.io"],
   },
   preview: {
-    host: "127.0.0.1",
+    host: process.env.PREVIEW_HOST ?? "127.0.0.1",
     allowedHosts: [".taila76294.ts.net", ".heygaia.io"],
   },
 });
