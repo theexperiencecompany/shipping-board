@@ -50,8 +50,14 @@ ssh gaia@gaia-home-server '
   docker rm -f shipping-board-next &&
   docker run -d --name shipping-board-next --restart always \
     --env-file ~/shipping-board.env --network homepage_default \
+    -p 127.0.0.1:5182:5181 \
     shipping-board-next:local npx vp preview --port 5181 --strictPort'
 ```
 
-Remove it: `docker rm -f shipping-board-next`, delete the `@shippingnext` handle,
+The M4 runner (`tag:runner`) cannot reach `*.lab` on 443. It reads the board at
+`http://gaia-home-server.taila76294.ts.net:5182`, served by
+`tailscale serve --bg --tcp 5182 tcp://127.0.0.1:5182` (bypasses ufw, like 443) and
+allowed by one tailnet rule: `tag:runner` → `tag:homelab:5182`.
+
+Remove it: `docker rm -f shipping-board-next`, `sudo tailscale serve --tcp 5182 off`, delete the `@shippingnext` handle,
 then `docker exec lab-caddy caddy reload --config /etc/caddy/Caddyfile`.
