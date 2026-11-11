@@ -5,6 +5,7 @@ import { DeployCard } from "./DeployCard";
 import { FailureDialog } from "./FailureDialog";
 import { FitList } from "./FitList";
 import { Icon } from "./Icon";
+import { PrTitle } from "./PrTitle";
 import { QueueList } from "./QueueList";
 import { RunningCard } from "./RunningCard";
 import { duration, lasted, timeAgo } from "./time";
@@ -15,12 +16,15 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
   const [hiddenLeft, setHiddenLeft] = useState(0);
   const [hiddenRight, setHiddenRight] = useState(0);
 
+  // Columns only for lanes that are red somewhere, so titles keep their room.
+  const red = new Set(data.attention.flatMap((item) => item.lanes ?? []));
+  const redLanes = data.laneNames.filter((lane) => red.has(lane));
   const moving = data.running.length + data.queue.length + (data.deploy ? 1 : 0);
   const clear = data.attention.length === 0;
 
   return (
     <>
-      <div className="grid h-full grid-cols-[1.1fr_1fr] gap-[0.7rem] px-[1.2rem]">
+      <div className="grid h-full grid-cols-[1.35fr_1fr] gap-[0.7rem] px-[1.2rem]">
         <Column
           icon={clear ? "i-tick" : "i-alert"}
           label="Needs you"
@@ -43,6 +47,7 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
                   key={item.key}
                   item={item}
                   viewer={data.viewer}
+                  laneNames={redLanes}
                   now={now}
                   index={index}
                   onFailure={setFailure}
@@ -101,7 +106,7 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
                 className="flex shrink-0 items-center gap-3 rounded-[0.8rem] bg-ok-card px-[0.9rem] py-[0.55rem]"
               >
                 <span className="min-w-0 flex-1 truncate text-[1.05rem] font-semibold">
-                  {pr.title}
+                  <PrTitle title={pr.title} />
                 </span>
                 <span className="shrink-0 text-[0.85rem] text-ink-2">
                   green for{" "}
@@ -129,7 +134,9 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
                 className="flex shrink-0 items-center gap-3 px-[0.3rem] py-[0.1rem] text-[0.9rem]"
               >
                 <Icon name="i-tick" className="size-[0.85rem] shrink-0 text-ok" />
-                <span className="min-w-0 flex-1 truncate text-ink-2">{pull.title}</span>
+                <span className="min-w-0 flex-1 truncate text-ink-2">
+                  <PrTitle title={pull.title} />
+                </span>
                 <span className="shrink-0 text-ink-3">
                   open {duration(pull.openMinutes)} · {timeAgo(pull.mergedAt, now)}
                 </span>

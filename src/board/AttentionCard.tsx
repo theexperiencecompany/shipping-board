@@ -2,6 +2,7 @@ import type { IconName } from "../icons";
 import { AuthorAvatar } from "./AuthorAvatar";
 import { cn } from "./cn";
 import { Icon } from "./Icon";
+import { PrTitle } from "./PrTitle";
 import { lasted } from "./time";
 import type { Attention, AttentionKind, FailureReport } from "./types";
 
@@ -32,12 +33,14 @@ function Chip({ icon, label, hot }: { icon: IconName; label: string; hot: boolea
 export function AttentionCard({
   item,
   viewer,
+  laneNames,
   now,
   index,
   onFailure,
 }: {
   item: Attention;
   viewer: string;
+  laneNames: string[];
   now: number;
   index: number;
   onFailure: (report: FailureReport) => void;
@@ -50,7 +53,7 @@ export function AttentionCard({
     <article
       data-item
       className={cn(
-        "rise flex shrink-0 flex-col gap-[0.4rem] rounded-[0.8rem] px-[0.9rem] py-[0.65rem]",
+        "rise flex shrink-0 flex-col rounded-[0.7rem] px-[0.9rem] py-[0.55rem]",
         "shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]",
         kind.hot ? "bg-err-card" : "bg-card",
         failure && "cursor-pointer hover:brightness-125",
@@ -70,24 +73,41 @@ export function AttentionCard({
           }
         : {})}
     >
-      <div className="flex items-baseline gap-3">
-        <h3 className="min-w-0 flex-1 truncate text-[1.15rem] leading-[1.3] font-semibold tracking-[-0.015em]">
-          {item.title}
+      <div className="flex min-w-0 items-center gap-3">
+        <h3 className="min-w-0 flex-1 truncate text-[1.1rem] leading-[1.3] font-semibold tracking-[-0.015em]">
+          <PrTitle title={item.title} />
         </h3>
-        {author && <AuthorAvatar name={author} size={20} />}
-        <span className="shrink-0 text-[0.85rem] whitespace-nowrap text-ink-2">
-          for <b className="text-[1.1rem] font-semibold text-ink">{lasted(item.since, now)}</b>
-        </span>
-      </div>
-
-      <div className="flex min-w-0 items-center gap-2">
-        {item.lanes?.map((lane) => (
-          <Chip key={lane} icon="i-x" label={lane} hot />
-        ))}
-        {kind.label && <Chip icon={kind.icon} label={kind.label} hot={kind.hot} />}
         {item.note && (
-          <span className="ml-1 min-w-0 truncate text-[0.9rem] text-ink-2">{item.note}</span>
+          <span className="max-w-[40%] shrink truncate text-[0.85rem] text-ink-2">{item.note}</span>
         )}
+        {author && <AuthorAvatar name={author} size={20} />}
+        {item.lanes ? (
+          <span className="flex shrink-0 gap-1.5">
+            {[...laneNames, ...item.lanes.filter((lane) => !laneNames.includes(lane))].map((lane) =>
+              item.lanes?.includes(lane) ? (
+                <span key={lane} className="w-[4.6rem]">
+                  <Chip icon="i-x" label={lane} hot />
+                </span>
+              ) : (
+                <span key={lane} className="w-[4.6rem]" />
+              ),
+            )}
+          </span>
+        ) : (
+          kind.label && (
+            <span
+              className="flex shrink-0"
+              style={{
+                width: `calc(${laneNames.length} * 4.6rem + ${laneNames.length - 1} * 0.375rem)`,
+              }}
+            >
+              <Chip icon={kind.icon} label={kind.label} hot={kind.hot} />
+            </span>
+          )
+        )}
+        <span className="w-[4.2rem] shrink-0 text-right text-[1.05rem] font-semibold whitespace-nowrap text-ink">
+          {lasted(item.since, now)}
+        </span>
       </div>
     </article>
   );

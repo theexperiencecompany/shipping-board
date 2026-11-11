@@ -1,6 +1,7 @@
 import { cn } from "./cn";
 import { Icon } from "./Icon";
 import { Lanes } from "./Lanes";
+import { PrTitle } from "./PrTitle";
 import { MACHINES } from "./machines";
 import { duration } from "./time";
 import type { PullRequest, Timing } from "./types";
@@ -27,7 +28,7 @@ export function RunningCard({
     >
       <div className="flex items-baseline gap-3">
         <h3 className="min-w-0 flex-1 truncate text-[1.05rem] leading-[1.3] font-semibold tracking-[-0.012em]">
-          {pr.title}
+          <PrTitle title={pr.title} />
         </h3>
         <span className="shrink-0 text-[1.05rem] font-semibold whitespace-nowrap">
           {duration(pr.minutes)}

@@ -647,6 +647,7 @@ async function snapshot(): Promise<BoardData> {
   return {
     viewer: viewer.login,
     clock: zonedClock(config.timezone),
+    laneNames: config.lanes.map((lane) => lane.name),
     main,
     mergedDay: mergeTimes.day,
     mergedWeekAverage: mergeTimes.weekAverage,

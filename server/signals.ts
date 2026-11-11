@@ -151,7 +151,7 @@ export function attention(input: AttentionInput): Attention[] {
       key: `failing:${pr.number}`,
       title: pr.title,
       lanes: failingLanes(pr),
-      note: idleSince(pr, now, input.idleMinutes) ? "Nothing pushed since" : undefined,
+      note: idleSince(pr, now, input.idleMinutes) ? "no push since" : undefined,
       since: pr.updatedAt,
       pr,
     });

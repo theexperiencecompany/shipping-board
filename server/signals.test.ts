@@ -177,7 +177,7 @@ describe("attention", () => {
     const fixed = failing(2, ["lint-node"], { updatedAt: ago(60), lastCommitAt: ago(5) });
     const idle = failing(3, ["lint-node"], { updatedAt: ago(60), lastCommitAt: ago(90) });
     const notes = attention({ ...base, failing: [fresh, fixed, idle] }).map((item) => item.note);
-    expect(notes).toEqual([undefined, undefined, "Nothing pushed since"]);
+    expect(notes).toEqual([undefined, undefined, "no push since"]);
   });
 
   it("gives a pull request one card even when it has several problems", () => {
