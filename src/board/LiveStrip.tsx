@@ -1,5 +1,6 @@
 import { cn } from "./cn";
 import { Icon } from "./Icon";
+import { PrTitle } from "./PrTitle";
 import { duration, lasted } from "./time";
 import type { BoardData } from "./types";
 
@@ -25,7 +26,9 @@ export function LiveStrip({ data, now }: { data: BoardData; now: number }) {
               {failed ? "failed" : "live"} {lasted(deployment.createdAt, now)}
             </span>
             {deployment.pr && (
-              <span className="min-w-0 truncate text-ink-3">{deployment.pr.title}</span>
+              <span className="min-w-0 truncate text-ink-3">
+                <PrTitle title={deployment.pr.title} />
+              </span>
             )}
             <span className="shrink-0 text-ink-3">
               · deployed in {duration(deployment.durationMinutes)}
