@@ -62,6 +62,22 @@ async function request<T>(url: string, init?: RequestInit, attempt = 0): Promise
 
 export const rest = <T>(path: string) => request<T>(`${API}${path}`);
 
+/** A POST that answers with no body, like GitHub's re-run and cancel endpoints. */
+export async function post(path: string): Promise<void> {
+  const response = await fetch(`${API}${path}`, {
+    method: "POST",
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token()}`,
+      "x-github-api-version": "2022-11-28",
+    },
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`${response.status} ${response.statusText} ${path} :: ${body.slice(0, 200)}`);
+  }
+}
+
 export async function restText(path: string): Promise<string> {
   const response = await fetch(`${API}${path}`, {
     redirect: "follow",
@@ -92,6 +108,7 @@ export interface Run {
   head_branch: string;
   created_at: string;
   run_started_at: string | null;
+  run_attempt: number;
   updated_at: string;
   html_url: string;
   path: string;

@@ -19,7 +19,7 @@ export function Column({
   count?: number;
   tone?: Tone;
   hidden?: number;
-  note?: string;
+  note?: React.ReactNode;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -45,7 +45,7 @@ export function Column({
           <span className="text-[1.15rem] font-semibold text-ink-3">{count}</span>
         )}
         <span className="ml-auto flex gap-3 text-[0.85rem] text-ink-3">
-          {note && <span>{note}</span>}
+          {note && <span className="flex items-center gap-2">{note}</span>}
           {hidden > 0 && <span>{hidden} more not shown</span>}
         </span>
       </header>

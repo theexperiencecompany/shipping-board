@@ -1,18 +1,32 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { AttentionCard } from "./AttentionCard";
 import { Column, SubHead } from "./Column";
 import { DeployCard } from "./DeployCard";
-import { FailureDialog } from "./FailureDialog";
 import { FitList } from "./FitList";
 import { Icon } from "./Icon";
+import { PrDialog } from "./PrDialog";
 import { PrTitle } from "./PrTitle";
 import { QueueList } from "./QueueList";
 import { RunningCard } from "./RunningCard";
+import { Trend } from "./Trend";
 import { duration, lasted, timeAgo } from "./time";
-import type { BoardData, FailureReport } from "./types";
+import type { Attention, BoardData } from "./types";
+
+/** "CI 16m → 18m over 7 days", with the line; just the typical time without enough history. */
+function CiNote({ typical, days }: { typical: number; days: (number | null)[] }) {
+  const known = days.filter((value): value is number => value !== null);
+  if (known.length < 2) return <>CI usually takes {duration(typical)}</>;
+  return (
+    <>
+      <Trend days={days} />
+      CI {duration(known[0])} → {duration(known[known.length - 1])} over 7 days
+    </>
+  );
+}
 
 export function Board({ data, now }: { data: BoardData; now: number }) {
-  const [failure, setFailure] = useState<FailureReport | null>(null);
+  const [open, setOpen] = useState<Attention | null>(null);
+  const closeDialog = useCallback(() => setOpen(null), []);
   const [hiddenLeft, setHiddenLeft] = useState(0);
   const [hiddenRight, setHiddenRight] = useState(0);
 
@@ -46,7 +60,7 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
                   viewer={data.viewer}
                   now={now}
                   index={index}
-                  onFailure={setFailure}
+                  onOpen={setOpen}
                 />
               ))}
             </FitList>
@@ -57,7 +71,7 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
           icon="i-flowchart"
           label="In progress"
           count={moving}
-          note={data.ci ? `CI usually takes ${duration(data.ci.typical)}` : undefined}
+          note={data.ci ? <CiNote typical={data.ci.typical} days={data.ciTrend} /> : undefined}
           hidden={hiddenRight}
           className="quiet"
         >
@@ -142,7 +156,7 @@ export function Board({ data, now }: { data: BoardData; now: number }) {
         </Column>
       </div>
 
-      <FailureDialog report={failure} onClose={() => setFailure(null)} />
+      <PrDialog item={open} flaky={data.flaky} onClose={closeDialog} />
     </>
   );
 }

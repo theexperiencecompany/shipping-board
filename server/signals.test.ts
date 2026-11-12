@@ -4,7 +4,11 @@ import type { Run } from "./github";
 import {
   attention,
   backlogCause,
+  dailyMedians,
+  errorLine,
+  flakyChecks,
   ciTiming,
+  logExcerpt,
   jobFamily,
   livePerEnvironment,
   mainState,
@@ -29,6 +33,7 @@ function run(overrides: Partial<Run>): Run {
     updated_at: ago(10),
     html_url: "",
     path: ".github/workflows/ci.yml",
+    run_attempt: 1,
     ...overrides,
   };
 }
@@ -47,6 +52,7 @@ function pr(number: number, overrides: Partial<PullRequest> = {}): PullRequest {
     lanes: [],
     jobs: { done: 0, total: 0 },
     waiting: false,
+    runId: null,
     conflict: false,
     changesRequested: false,
     openThreads: 0,
@@ -71,6 +77,7 @@ const base = {
   failing: [] as PullRequest[],
   open: [] as PullRequest[],
   notStarted: [] as PullRequest[],
+  flaky: new Set<string>(),
   runners: null,
   hosted: null,
   latestDeploy: null,
@@ -148,12 +155,30 @@ describe("attention", () => {
       ],
     });
     const [item] = attention({ ...base, failing: [red] });
-    expect(item).toMatchObject({ kind: "failing", title: "feat: invite page", lanes: ["test"] });
+    expect(item).toMatchObject({
+      kind: "failing",
+      title: "feat: invite page",
+      lanes: [{ name: "test", flaky: false }],
+    });
   });
 
   it("falls back to the job name when no lane covers it", () => {
     const [item] = attention({ ...base, failing: [failing(1, ["smoke-web (prod)"])] });
-    expect(item.lanes).toEqual(["smoke-web"]);
+    expect(item.lanes).toEqual([{ name: "smoke-web", flaky: false }]);
+  });
+
+  it("marks a lane flaky only when every failure in it is a known flaky check", () => {
+    const red = failing(1, ["mutation (shard 2/6)", "lint-node"], {
+      lanes: [
+        { name: "lint", state: "fail" },
+        { name: "test", state: "fail" },
+      ],
+    });
+    const [item] = attention({ ...base, failing: [red], flaky: new Set(["mutation"]) });
+    expect(item.lanes).toEqual([
+      { name: "lint", flaky: false },
+      { name: "test", flaky: true },
+    ]);
   });
 
   it("lists each PR whose CI has not started, with why", () => {
@@ -230,6 +255,99 @@ describe("backlogCause", () => {
     expect(backlogCause([home, m4], { running: 3, limit: 20, plan: "free" })).toBe(
       "Runners are idle. Re-run it",
     );
+  });
+});
+
+describe("errorLine", () => {
+  const log = (lines: string[]) =>
+    lines.map((line) => `2026-11-11T21:21:43.9217601Z ${line}`).join("\n");
+
+  it("skips lines that only point elsewhere", () => {
+    expect(
+      errorLine(
+        log([
+          "Run pnpm lint",
+          "##[error]lint-node/components-per-file: FAIL — its first error lines are attached",
+          "##[error]❌ components-per-file gate FAILED — 1 file(s) export more than 2 React components:",
+          "##[error]Process completed with exit code 1.",
+        ]),
+      ),
+    ).toBe("components-per-file gate: 1 file(s) export more than 2 React components:");
+  });
+
+  it("drops roll-ups and trims the mutation boilerplate", () => {
+    expect(
+      errorLine(
+        log([
+          "##[error]mutation/shard-1: FAIL — 2 of 4 module(s) did not pass: a.py b.py",
+          "##[error]mutation/a.py: FAIL — 1 surviving mutant(s) on 1 changed line(s) in a.py — the suite would not notice this code being wrong",
+        ]),
+      ),
+    ).toBe("mutation/a.py: 1 surviving mutant(s) on 1 changed line(s) in a.py");
+  });
+
+  it("skips a bare count for the test it summarises", () => {
+    expect(
+      errorLine(
+        log([
+          "##[error]ts-build-test/test-typescript: FAIL — test-typescript: 2 finding(s) (exit 1)",
+          "##[error]FAIL src/__tests__/a.test.tsx > settings > rolls back a refused change",
+        ]),
+      ),
+    ).toBe("FAIL src/__tests__/a.test.tsx > settings > rolls back a refused change");
+  });
+
+  it("returns nothing when the log has no real error", () => {
+    expect(errorLine(log(["##[error]Process completed with exit code 1."]))).toBeNull();
+  });
+});
+
+describe("logExcerpt", () => {
+  const lines = Array.from({ length: 100 }, (_, i) => `line ${i}`);
+  lines[60] = "2026-11-11T21:21:43Z ##[error]lint-node: components-per-file gate FAILED";
+  lines[90] = "2026-11-11T21:21:50Z ##[error]Process completed with exit code 1.";
+
+  it("centres on the first real error, not the end of the job", () => {
+    const excerpt = logExcerpt(lines.join("\n"), 20).split("\n");
+    expect(excerpt[0]).toBe("line 45");
+    expect(excerpt).toContain(lines[60]);
+    expect(excerpt).toHaveLength(20);
+  });
+
+  it("falls back to the tail when nothing is marked", () => {
+    expect(logExcerpt("a\nb\nc", 2)).toBe("b\nc");
+  });
+});
+
+describe("flakyChecks", () => {
+  it("counts checks that failed first and passed on a rerun", () => {
+    expect(
+      flakyChecks([
+        {
+          failedFirst: ["mutation (shard 1/6)", "lint-node"],
+          passedLast: ["mutation (shard 1/6)"],
+        },
+        {
+          failedFirst: ["mutation (shard 3/6)"],
+          passedLast: ["mutation (shard 3/6)", "lint-node"],
+        },
+        { failedFirst: ["test-python (unit)"], passedLast: [] },
+        { failedFirst: ["lint-node", "quality-gate"], passedLast: ["lint-node", "quality-gate"] },
+      ]),
+    ).toEqual([{ name: "mutation", count: 2 }]);
+  });
+});
+
+describe("dailyMedians", () => {
+  it("buckets green PR runs by day, oldest first, and skips thin days", () => {
+    const at = (daysAgo: number, minutes: number) =>
+      run({
+        created_at: ago(daysAgo * 1440 + 60),
+        run_started_at: ago(daysAgo * 1440 + 60),
+        updated_at: ago(daysAgo * 1440 + 60 - minutes),
+      });
+    const runs = [at(0, 10), at(0, 20), at(0, 30), at(2, 40), at(2, 50), at(2, 60), at(5, 5)];
+    expect(dailyMedians(runs, NOW, 7)).toEqual([null, null, null, null, 50, null, 20]);
   });
 });
 

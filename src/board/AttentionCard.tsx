@@ -4,7 +4,7 @@ import { cn } from "./cn";
 import { Icon } from "./Icon";
 import { PrTitle } from "./PrTitle";
 import { timeAgo } from "./time";
-import type { Attention, AttentionKind, FailureReport } from "./types";
+import type { Attention, AttentionKind } from "./types";
 
 const KIND: Record<AttentionKind, { label?: string; icon: IconName; hot: boolean; verb: string }> =
   {
@@ -36,16 +36,17 @@ export function AttentionCard({
   viewer,
   now,
   index,
-  onFailure,
+  onOpen,
 }: {
   item: Attention;
   viewer: string;
   now: number;
   index: number;
-  onFailure: (report: FailureReport) => void;
+  onOpen: (item: Attention) => void;
 }) {
   const kind = KIND[item.kind];
-  const failure = item.pr?.failure;
+  // Failing and stuck PRs open a panel to brief an agent or re-run CI.
+  const actionable = (item.kind === "failing" || item.kind === "stuck") && Boolean(item.pr?.runId);
   const author = item.pr && item.pr.author !== viewer ? item.pr.author : null;
   // Failed after the last push and nobody has pushed since: the agent stopped.
   const idle = item.kind === "failing" && item.note !== undefined;
@@ -57,19 +58,19 @@ export function AttentionCard({
         "rise flex shrink-0 flex-col gap-[0.3rem] rounded-[0.7rem] px-[0.9rem] py-[0.5rem]",
         "shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]",
         kind.hot ? "bg-err-card" : "bg-card",
-        failure && "cursor-pointer hover:brightness-125",
+        actionable && "cursor-pointer hover:brightness-125",
       )}
       style={{ animationDelay: `${index * 30}ms` }}
-      {...(failure
+      {...(actionable
         ? {
             role: "button",
             tabIndex: 0,
-            "aria-label": `${item.title}, show failure logs`,
-            onClick: () => onFailure(failure),
+            "aria-label": `${item.title}, open actions`,
+            onClick: () => onOpen(item),
             onKeyDown: (event: React.KeyboardEvent) => {
               if (event.key !== "Enter" && event.key !== " ") return;
               event.preventDefault();
-              onFailure(failure);
+              onOpen(item);
             },
           }
         : {})}
@@ -88,7 +89,12 @@ export function AttentionCard({
 
       <div className="flex min-w-0 items-center gap-1.5">
         {item.lanes?.map((lane) => (
-          <Chip key={lane} icon="i-x" label={lane} hot />
+          <Chip
+            key={lane.name}
+            icon="i-x"
+            label={lane.flaky ? `${lane.name} · flaky?` : lane.name}
+            hot
+          />
         ))}
         {kind.label && <Chip icon={kind.icon} label={kind.label} hot={kind.hot} />}
         {item.note && !idle && (

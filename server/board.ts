@@ -16,6 +16,10 @@ import { config, isControlJob, laneOf } from "./config";
 import {
   attention,
   ciTiming,
+  dailyMedians,
+  errorLine,
+  flakyChecks,
+  logExcerpt,
   livePerEnvironment,
   mainState,
   type Merged,
@@ -27,6 +31,7 @@ import { zoneParts, zonedClock } from "./time";
 import {
   graphql,
   lowBudget,
+  post,
   rate,
   rest,
   restText,
@@ -492,6 +497,42 @@ async function hostedLoad(): Promise<HostedLoad | null> {
   }
 }
 
+const DAY = 24 * 3_600_000;
+
+/** Green PR runs for each of the last 8 days. Finished days never change. */
+async function greenRuns(): Promise<Run[]> {
+  const days = Array.from({ length: 8 }, (_, back) =>
+    new Date(Date.now() - back * DAY).toISOString().slice(0, 10),
+  );
+  const pages = await mapLimit(days, 3, (day, index) =>
+    cached(`green:${day}`, index === 0 ? 600_000 : 6 * 3_600_000, () =>
+      rest<{ workflow_runs: Run[] }>(
+        `/repos/${REPO}/actions/workflows/${config.workflow}/runs?event=pull_request&status=success&created=${day}&per_page=100`,
+      ),
+    ).catch(() => ({ workflow_runs: [] as Run[] })),
+  );
+  return pages.flatMap((page) => page.workflow_runs);
+}
+
+/** For green runs that needed a rerun: what failed the first time, what passed the last. */
+async function reruns(green: Run[]): Promise<{ failedFirst: string[]; passedLast: string[] }[]> {
+  const rerun = green.filter((run) => run.run_attempt > 1).slice(0, 40);
+  return mapLimit(rerun, 4, async (run) => {
+    try {
+      const first = await cached(`attempt1:${run.id}`, Number.POSITIVE_INFINITY, () =>
+        rest<{ jobs: Job[] }>(`/repos/${REPO}/actions/runs/${run.id}/attempts/1/jobs?per_page=100`),
+      );
+      const last = await jobsFor(run);
+      return {
+        failedFirst: first.jobs.filter((job) => stateOf(job) === "fail").map((job) => job.name),
+        passedLast: last.filter((job) => stateOf(job) === "pass").map((job) => job.name),
+      };
+    } catch {
+      return { failedFirst: [], passedLast: [] };
+    }
+  });
+}
+
 function baseCard(node: PullNode): PullRequest {
   return {
     number: `#${node.number}`,
@@ -506,6 +547,7 @@ function baseCard(node: PullNode): PullRequest {
     lanes: [],
     jobs: { done: 0, total: 0 },
     waiting: false,
+    runId: null,
     conflict: node.mergeable === "CONFLICTING",
     changesRequested: node.reviewDecision === "CHANGES_REQUESTED",
     openThreads: node.reviewThreads.nodes.filter((thread) => !thread.isResolved).length,
@@ -525,6 +567,7 @@ function withRun(card: PullRequest, run: Run, jobs: Job[]): PullRequest {
     lanes: waiting ? [] : lanesOf(jobs),
     jobs: { done: jobs.filter((job) => job.status === "completed").length, total: jobs.length },
     waiting,
+    runId: run.id,
     failure: failureOf(jobs),
   };
 }
@@ -552,6 +595,8 @@ async function snapshot(): Promise<BoardData> {
       runnerPools(),
     ]);
   const hosted = lowBudget() ? null : await hostedLoad();
+  const green = lowBudget() ? [] : await greenRuns();
+  const flaky = flakyChecks(lowBudget() ? [] : await reruns(green));
 
   const queuedNumbers = new Set(queueNodes.map((node) => node.pullRequest.number));
 
@@ -664,7 +709,10 @@ async function snapshot(): Promise<BoardData> {
       mergedAt: pull.mergedAt,
       openMinutes: minutesBetween(pull.createdAt, pull.mergedAt),
     })),
-    ci: ciTiming(runs.workflow_runs),
+    // A week of green runs gives a steadier "typical" than the last few hours.
+    ci: ciTiming(green.length > 0 ? green : runs.workflow_runs),
+    ciTrend: dailyMedians(green, Date.now()),
+    flaky,
     deployTypical: greenDeploys.length >= 3 ? percentile(greenDeploys, 0.5) : null,
     attention: attention({
       main,
@@ -676,6 +724,7 @@ async function snapshot(): Promise<BoardData> {
       latestDeploy: deployInfo.history[0] ?? null,
       now: Date.now(),
       idleMinutes: config.idleMinutes,
+      flaky: new Set(flaky.map((check) => check.name)),
     }),
     ready: ready.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)).slice(0, config.readyLimit),
     running: running
@@ -704,7 +753,54 @@ export async function jobLog(jobId: number, full = false): Promise<string> {
       return `GitHub did not return a log for this job. ${error instanceof Error ? error.message : ""}`.trim();
     }
     if (full) return text;
-    const lines = text.split("\n");
-    return lines.slice(Math.max(0, lines.length - config.logTailLines)).join("\n");
+    return logExcerpt(text, config.logTailLines);
   });
+}
+
+/** The first real error line of each job's log, for the "copy for agent" brief. */
+export async function jobErrors(ids: number[]): Promise<Record<number, string | null>> {
+  const lines = await mapLimit(ids.slice(0, 10), 4, (id) =>
+    cached(`error:${id}`, Number.POSITIVE_INFINITY, async () => {
+      try {
+        return errorLine(await restText(`/repos/${REPO}/actions/jobs/${id}/logs`));
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return Object.fromEntries(ids.map((id, index) => [id, lines[index] ?? null]));
+}
+
+/**
+ * Re-run a PR's CI from the board. Only runs the board itself shows as failing or
+ * stuck can be re-run, so this endpoint cannot be pointed at anything else.
+ */
+export async function rerun(runId: number): Promise<string> {
+  const board = await loadBoard();
+  const allowed = board.attention.some(
+    (item) => (item.kind === "failing" || item.kind === "stuck") && item.pr?.runId === runId,
+  );
+  if (!allowed) throw new Error("That run is not failing or stuck on the board.");
+
+  const run = await rest<Run>(`/repos/${REPO}/actions/runs/${runId}`);
+  if (run.status !== "completed") {
+    // A run nothing picked up cannot be re-run in place; cancel it, then start it again.
+    await post(`/repos/${REPO}/actions/runs/${runId}/cancel`);
+    for (let tries = 0; tries < 15; tries++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const now = await rest<Run>(`/repos/${REPO}/actions/runs/${runId}`);
+      if (now.status === "completed") break;
+    }
+    await post(`/repos/${REPO}/actions/runs/${runId}/rerun`);
+    store.delete("board");
+    return "Cancelled the stuck run and started it again.";
+  }
+  if (run.conclusion === "failure") {
+    await post(`/repos/${REPO}/actions/runs/${runId}/rerun-failed-jobs`);
+    store.delete("board");
+    return "Re-running the failed jobs.";
+  }
+  await post(`/repos/${REPO}/actions/runs/${runId}/rerun`);
+  store.delete("board");
+  return "Re-running the whole run.";
 }

@@ -38,10 +38,18 @@ export interface PullRequest {
   jobs: { done: number; total: number };
   /** Run exists but no job has been picked up by a runner yet. */
   waiting: boolean;
+  /** The CI run the card describes, so the board can re-run it. */
+  runId: number | null;
   conflict: boolean;
   changesRequested: boolean;
   openThreads: number;
   failure?: FailureReport;
+}
+
+export interface RedLane {
+  name: string;
+  /** Every job that failed in this lane has failed and then passed on a rerun lately. */
+  flaky: boolean;
 }
 
 /** Why something sits in the "Needs you" column. Ordered by severity. */
@@ -52,7 +60,7 @@ export interface Attention {
   key: string;
   title: string;
   /** Red lanes, for a failing PR: lint, build, test, e2e. */
-  lanes?: string[];
+  lanes?: RedLane[];
   /** One short line of context, when there is something worth saying. */
   note?: string;
   /** ISO time the problem started, so the board can show how long it has lasted. */
@@ -156,6 +164,10 @@ export interface BoardData {
   /** Median minutes from opening a pull request to merging it, over the last week. */
   shippedTypical: number | null;
   ci: Timing | null;
+  /** Median green CI minutes for each of the last 7 days, oldest first. */
+  ciTrend: (number | null)[];
+  /** Checks that failed and then passed on a rerun of the same commit, most often first. */
+  flaky: { name: string; count: number }[];
   deployTypical: number | null;
   attention: Attention[];
   ready: PullRequest[];

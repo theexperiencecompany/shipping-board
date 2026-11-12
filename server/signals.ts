@@ -5,9 +5,11 @@ import type {
   HostedLoad,
   MainBranch,
   PullRequest,
+  RedLane,
   RunnerPool,
   Timing,
 } from "../src/board/types";
+import { isControlJob, laneOf } from "./config";
 import type { Run } from "./github";
 
 const MINUTE = 60_000;
@@ -63,6 +65,48 @@ export function mainState(name: string, runs: Run[]): MainBranch {
   return { name, state, since };
 }
 
+const ERROR = /##\[error\](.*)$/;
+// Lines that only say "something failed, look elsewhere" carry no information of their own.
+const NOISE = [
+  /^Process completed with exit code/,
+  /: FAIL — \d+ of \d+ /,
+  /\b(above|below|attached)\W*$/,
+  // A bare count ("2 finding(s) (exit 1)") names nothing; the lines after it do.
+  /\b\d+ (finding|error|failure|problem|issue)\(?s?\)?( \(exit \d+\))?\.?$/,
+];
+
+/** The first error line in a GitHub Actions log that actually says what broke. */
+export function errorLine(log: string): string | null {
+  for (const raw of log.split("\n")) {
+    const match = raw.match(ERROR);
+    if (!match) continue;
+    const said = match[1].replace(/^[^\p{L}\p{N}]+/u, "").trim();
+    if (!said || NOISE.some((pattern) => pattern.test(said))) continue;
+    const line = said
+      .replace(/\s+—\s+the suite would not notice.*$/, "")
+      .replace(/:?\s+FAIL(ED)?\s+—\s+/, ": ");
+    return line.length > 300 ? `${line.slice(0, 299)}…` : line;
+  }
+  return null;
+}
+
+/**
+ * The part of a log worth reading: the lines leading up to the first real error, or
+ * the end of the log when nothing is marked as an error.
+ */
+export function logExcerpt(log: string, size: number): string {
+  const lines = log.split("\n");
+  const first = lines.findIndex((line) => {
+    const match = line.match(ERROR);
+    if (!match) return false;
+    const said = match[1].replace(/^[^\p{L}\p{N}]+/u, "").trim();
+    return said !== "" && !NOISE.some((pattern) => pattern.test(said));
+  });
+  if (first === -1) return lines.slice(Math.max(0, lines.length - size)).join("\n");
+  const start = Math.max(0, first - Math.floor(size * 0.75));
+  return lines.slice(start, start + size).join("\n");
+}
+
 /** "mutation (shard 2/6 (4 modules))" and "mutation (app/x.py)" are the same check. */
 export function jobFamily(name: string): string {
   return name.replace(/\s*\(.*$/, "").trim();
@@ -87,6 +131,8 @@ export interface AttentionInput {
   hosted: HostedLoad | null;
   latestDeploy: Deployment | null;
   now: number;
+  /** Check names known to fail and then pass on a rerun. */
+  flaky: Set<string>;
   /** A failure with no push for this long reads as abandoned. */
   idleMinutes: number;
 }
@@ -106,11 +152,57 @@ export function backlogCause(runners: RunnerPool[] | null, hosted: HostedLoad | 
   return "Every runner is busy";
 }
 
-/** The lanes a failing PR is red in, which is what you tell an agent to fix. */
-export function failingLanes(pr: PullRequest): string[] {
-  const lanes = pr.lanes.filter((lane) => lane.state === "fail").map((lane) => lane.name);
-  if (lanes.length > 0) return lanes;
-  return [...new Set((pr.failure?.jobs ?? []).map((job) => jobFamily(job.name)))];
+/**
+ * The lanes a failing PR is red in, which is what you tell an agent to fix. A lane is
+ * marked flaky when every job that failed in it is a check known to fail-then-pass.
+ */
+export function failingLanes(pr: PullRequest, flaky: Set<string> = new Set()): RedLane[] {
+  const jobs = pr.failure?.jobs ?? [];
+  const byLane = new Map<string, string[]>();
+  for (const job of jobs) {
+    const lane = laneOf(job.name) ?? jobFamily(job.name);
+    byLane.set(lane, [...(byLane.get(lane) ?? []), jobFamily(job.name)]);
+  }
+  const names = pr.lanes.filter((lane) => lane.state === "fail").map((lane) => lane.name);
+  const order = [...names, ...[...byLane.keys()].filter((lane) => !names.includes(lane))];
+  return order.map((name) => {
+    const families = byLane.get(name) ?? [];
+    return { name, flaky: families.length > 0 && families.every((family) => flaky.has(family)) };
+  });
+}
+
+/** Checks that failed on the first attempt and passed on a rerun of the same commit. */
+export function flakyChecks(
+  reruns: { failedFirst: string[]; passedLast: string[] }[],
+  minimum = 2,
+): { name: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const rerun of reruns) {
+    const passed = new Set(rerun.passedLast.map(jobFamily));
+    // Summary jobs like quality-gate fail because something else did; they say nothing.
+    const failed = rerun.failedFirst.filter((name) => !isControlJob(name));
+    for (const family of new Set(failed.map(jobFamily))) {
+      if (passed.has(family)) counts.set(family, (counts.get(family) ?? 0) + 1);
+    }
+  }
+  // One pass on a rerun can be bad luck on a runner; twice is a pattern.
+  return [...counts.entries()]
+    .filter(([, count]) => count >= minimum)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+/** Median green-run minutes per day for the last `days` days, oldest first. */
+export function dailyMedians(runs: Run[], now: number, days = 7): (number | null)[] {
+  const buckets: number[][] = Array.from({ length: days }, () => []);
+  for (const run of runs) {
+    if (run.conclusion !== "success" || run.event !== "pull_request") continue;
+    const age = now - new Date(run.created_at).getTime();
+    const day = Math.floor(age / (24 * 60 * MINUTE));
+    if (day < 0 || day >= days) continue;
+    buckets[days - 1 - day].push(runMinutes(run));
+  }
+  return buckets.map((values) => (values.length >= 3 ? percentile(values, 0.5) : null));
 }
 
 function idleSince(pr: PullRequest, now: number, idleMinutes: number): boolean {
@@ -150,7 +242,7 @@ export function attention(input: AttentionInput): Attention[] {
       kind: "failing",
       key: `failing:${pr.number}`,
       title: pr.title,
-      lanes: failingLanes(pr),
+      lanes: failingLanes(pr, input.flaky),
       note: idleSince(pr, now, input.idleMinutes) ? "no push since" : undefined,
       since: pr.updatedAt,
       pr,
