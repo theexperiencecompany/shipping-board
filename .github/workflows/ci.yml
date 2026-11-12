@@ -19,5 +19,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: npx vp check
+      - run: pnpm typecheck
       - run: npx vp test
       - run: npx vp build

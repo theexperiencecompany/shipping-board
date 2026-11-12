@@ -43,7 +43,10 @@ async function request<T>(url: string, init?: RequestInit, attempt = 0): Promise
   const reset = response.headers.get("x-ratelimit-reset");
   if (reset) rate.reset = Number(reset);
 
-  if ((response.status === 403 || response.status === 429) && attempt < 2) {
+  const limited =
+    response.status === 429 ||
+    (response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0");
+  if (limited && attempt < 2) {
     const wait = Number(response.headers.get("retry-after") ?? 0) * 1000 || 1500 * (attempt + 1);
     await new Promise((resolve) => setTimeout(resolve, wait));
     return request<T>(url, init, attempt + 1);
@@ -58,6 +61,22 @@ async function request<T>(url: string, init?: RequestInit, attempt = 0): Promise
 }
 
 export const rest = <T>(path: string) => request<T>(`${API}${path}`);
+
+/** A POST that answers with no body, like GitHub's re-run and cancel endpoints. */
+export async function post(path: string): Promise<void> {
+  const response = await fetch(`${API}${path}`, {
+    method: "POST",
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token()}`,
+      "x-github-api-version": "2022-11-28",
+    },
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`${response.status} ${response.statusText} ${path} :: ${body.slice(0, 200)}`);
+  }
+}
 
 export async function restText(path: string): Promise<string> {
   const response = await fetch(`${API}${path}`, {
@@ -89,6 +108,7 @@ export interface Run {
   head_branch: string;
   created_at: string;
   run_started_at: string | null;
+  run_attempt: number;
   updated_at: string;
   html_url: string;
   path: string;
@@ -103,17 +123,6 @@ export interface Job {
   completed_at: string | null;
   runner_name: string | null;
   labels: string[];
-  html_url: string;
-}
-
-export interface Pull {
-  number: number;
-  title: string;
-  draft: boolean;
-  merged_at: string | null;
-  user: { login: string };
-  head: { ref: string; sha: string };
-  updated_at: string;
   html_url: string;
 }
 

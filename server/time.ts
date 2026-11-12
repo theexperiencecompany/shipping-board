@@ -29,13 +29,6 @@ export function zoneParts(zone: string, at = new Date()): ZoneParts {
   };
 }
 
-export function startOfDay(zone: string, at = new Date()): number {
-  const now = zoneParts(zone, at);
-  const asUtc = Date.UTC(now.year, now.month - 1, now.day, now.hour, now.minute, now.second);
-  const offset = asUtc - at.getTime();
-  return Date.UTC(now.year, now.month - 1, now.day) - offset;
-}
-
 export function zonedClock(zone: string, at = new Date()): string {
   const now = zoneParts(zone, at);
   return `${String(now.hour).padStart(2, "0")}:${String(now.minute).padStart(2, "0")}`;

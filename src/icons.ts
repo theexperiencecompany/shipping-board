@@ -17,7 +17,8 @@ export type IconName =
   | "i-pr"
   | "i-github"
   | "i-blacksmith"
-  | "i-server";
+  | "i-server"
+  | "i-copy";
 
 export const icons: Record<IconName, { viewBox: string; body: string }> = {
   "i-user": {

@@ -17,6 +17,14 @@ const controlJobs = [
   /^deploy-web$/,
 ];
 
+function parseNight(value: string): { start: number; end: number } {
+  const [start, end] = value.split("-").map(Number);
+  if (!Number.isInteger(start) || !Number.isInteger(end)) {
+    throw new Error(`BOARD_NIGHT must look like "22-7", got "${value}"`);
+  }
+  return { start, end };
+}
+
 export const config = {
   repo: process.env.BOARD_REPO ?? "theexperiencecompany/gaia",
   branch: process.env.BOARD_BRANCH ?? "master",
@@ -30,7 +38,13 @@ export const config = {
     { name: "test", match: [/^test-/, /mutation/, /coverage/] },
   ] as LaneRule[],
   readyLimit: 4,
-  maxPerColumn: 5,
+  shippedLimit: 12,
+  /** A CI run that no runner has picked up for this long counts as stuck. */
+  backlogMinutes: 15,
+  /** Quiet hours on the board's clock, as BOARD_NIGHT="22-7". Everything but Needs you dims. */
+  night: parseNight(process.env.BOARD_NIGHT ?? "22-7"),
+  /** A failing pull request with no push for this long is flagged as abandoned. */
+  idleMinutes: 30,
   logTailLines: 120,
   pollMs: 15_000,
   cacheMs: 20_000,

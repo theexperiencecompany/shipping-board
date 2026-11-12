@@ -3,19 +3,30 @@
 @theme {
   --color-canvas: #030711;
   --color-lane: #080c14;
-  --color-card: #12161f;
+  --color-card: #11151e;
   --color-card-hi: #171d29;
-  --color-ink: #e1e7ef;
-  --color-ink-2: #a1a1aa;
-  --color-ink-3: #86868f;
-  --color-accent: #00bbff;
+  --color-rule: #18202d;
+  --color-ink: #e6eaf0;
+  --color-ink-2: #a9adb6;
+  --color-ink-3: #8a8d96;
+  --color-accent: #3bb8f5;
   --color-ok: #34d399;
   --color-warn: #fbbf24;
   --color-err: #f87171;
+  --color-err-card: #1a1217;
+  --color-ok-card: #0e1914;
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 @layer base {
+  /*
+   * The board is read from across a room, so type scales with the screen.
+   * 1920 wide gives a 20px base, 1440 gives 15px, 2560 gives 26px.
+   */
+  html {
+    font-size: clamp(14px, 1.04vw, 28px);
+  }
+
   html,
   body,
   #root {
@@ -26,10 +37,9 @@
     background: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-size: 13px;
-    line-height: 1.45;
+    font-size: 1rem;
+    line-height: 1.4;
     font-variant-numeric: tabular-nums;
-    caret-color: var(--color-accent);
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
   }
@@ -69,7 +79,7 @@
     box-shadow: 0 0 0 0 rgb(52 211 153 / 0.4);
   }
   100% {
-    box-shadow: 0 0 0 7px rgb(52 211 153 / 0);
+    box-shadow: 0 0 0 0.35rem rgb(52 211 153 / 0);
   }
 }
 
@@ -83,6 +93,11 @@
 
 .beat {
   animation: beat 3.4s ease-out infinite;
+}
+
+/* Overnight the screen lights a bedroom. Only what needs you stays bright. */
+.night .quiet {
+  opacity: 0.45;
 }
 
 @media (prefers-reduced-motion: reduce) {

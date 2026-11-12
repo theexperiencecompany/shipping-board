@@ -26,11 +26,46 @@ export interface PullRequest {
   title: string;
   branch: string;
   author: string;
+  url: string;
+  /** Minutes the latest run has been going, or took if finished. */
   minutes: number;
+  /** When the latest run finished, or last changed if still going. */
   updatedAt: string;
+  /** Last commit on the branch. Lets the board tell "being fixed" from "abandoned". */
+  lastCommitAt: string | null;
   machine: MachineKind;
   lanes: Lane[];
+  jobs: { done: number; total: number };
+  /** Run exists but no job has been picked up by a runner yet. */
+  waiting: boolean;
+  /** The CI run the card describes, so the board can re-run it. */
+  runId: number | null;
+  conflict: boolean;
+  changesRequested: boolean;
+  openThreads: number;
   failure?: FailureReport;
+}
+
+export interface RedLane {
+  name: string;
+  /** Every job that failed in this lane has failed and then passed on a rerun lately. */
+  flaky: boolean;
+}
+
+/** Why something sits in the "Needs you" column. Ordered by severity. */
+export type AttentionKind = "main" | "deploy" | "failing" | "stuck" | "conflict" | "changes";
+
+export interface Attention {
+  kind: AttentionKind;
+  key: string;
+  title: string;
+  /** Red lanes, for a failing PR: lint, build, test, e2e. */
+  lanes?: RedLane[];
+  /** One short line of context, when there is something worth saying. */
+  note?: string;
+  /** ISO time the problem started, so the board can show how long it has lasted. */
+  since: string;
+  pr?: PullRequest;
 }
 
 export type QueueState = "testing" | "queued";
@@ -48,7 +83,6 @@ export interface QueueEntry {
 export interface DeployStep {
   label: string;
   state: "done" | "run" | "wait";
-  note?: string;
 }
 
 export interface DeployPr {
@@ -76,31 +110,75 @@ export interface Deployment {
   pr?: DeployPr;
 }
 
-export interface RunnerLoad {
+export interface RunnerPool {
   kind: MachineKind;
-  jobs: number;
+  online: number;
+  busy: number;
+  total: number;
+}
+
+/** GitHub-hosted runners: jobs running now against the plan's concurrency limit. */
+export interface HostedLoad {
+  running: number;
+  limit: number;
+  plan: string;
 }
 
 export interface BatchInfo {
   done: number;
   total: number;
-  members: string[];
+}
+
+export interface Timing {
+  /** Median minutes for a green CI run on a pull request. */
+  typical: number;
+  /** 90th percentile, the line past which a run counts as slow. */
+  slow: number;
+  samples: number;
+}
+
+export interface MainBranch {
+  name: string;
+  state: "pass" | "fail" | "run" | "unknown";
+  /** When main entered its current state. */
+  since: string | null;
+}
+
+export interface Shipped {
+  number: string;
+  title: string;
+  author: string;
+  mergedAt: string;
+  /** Minutes from opening the pull request to merging it. */
+  openMinutes: number;
 }
 
 export interface BoardData {
   viewer: string;
   clock: string;
-  updatedSeconds: number;
-  averageWaitMinutes: number;
-  mergedToday: number;
-  laneNames: string[];
-  maxPerColumn: number;
-  needs: PullRequest[];
-  running: PullRequest[];
+  main: MainBranch;
+  /** Merged in the last 24 hours. */
+  mergedDay: number;
+  mergedWeekAverage: number;
+  shipped: Shipped[];
+  /** Median minutes from opening a pull request to merging it, over the last week. */
+  shippedTypical: number | null;
+  ci: Timing | null;
+  /** Median green CI minutes for each of the last 7 days, oldest first. */
+  ciTrend: (number | null)[];
+  /** Checks that failed and then passed on a rerun of the same commit, most often first. */
+  flaky: { name: string; count: number }[];
+  deployTypical: number | null;
+  attention: Attention[];
   ready: PullRequest[];
+  running: PullRequest[];
   queue: QueueEntry[];
   batch: BatchInfo | null;
   deploy: Deploy | null;
-  deployments: Deployment[];
-  runners: RunnerLoad[];
+  /** Newest deployment per environment. */
+  live: Deployment[];
+  runners: RunnerPool[] | null;
+  hosted: HostedLoad | null;
+  /** Quiet hours on the board's clock, when everything but Needs you dims. */
+  night: boolean;
 }
